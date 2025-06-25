@@ -1,6 +1,8 @@
-﻿using Project.Application.Dtos;
+﻿using Microsoft.EntityFrameworkCore;
+using Project.Application.Dtos;
 using Project.Domain.Entities;
 using Project.Domain.Interfaces;
+using Project.Infrastructure.Frameworks.EntityFramework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,9 +14,11 @@ namespace Project.Application.Services
     public class ProductService : IProductServices
     {
         private readonly IProductRepository _productRepository;
+        private readonly ApplicationDBContext _context;
 
-        public ProductService(IProductRepository productRepository)
+        public ProductService(IProductRepository productRepository,ApplicationDBContext context )
         {
+            _context = context ?? throw new ArgumentNullException(nameof(context));
             _productRepository = productRepository ?? throw new ArgumentNullException(nameof(productRepository));
         }
 
@@ -34,13 +38,50 @@ namespace Project.Application.Services
             return product != null ? ToProductDto(product) : null;
         }
 
-        public async Task<IEnumerable<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
+        public async Task<PagedResult<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var products = await _productRepository.GetAllAsync(pageNumber, pageSize, searchTerm?.Trim());
-            return products?.Select(ToProductDto) ?? Enumerable.Empty<ProductDto>();
+            var query = _context.Products.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                string term = searchTerm.Trim().ToLower();
+                query = query.Where(p =>
+                    (p.Name != null && p.Name.ToLower().Contains(term)) ||
+                    (p.Code != null && p.Code.ToLower().Contains(term)) ||
+                    (p.Description != null && p.Description.ToLower().Contains(term))
+                );
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var products = await query
+                .OrderBy(p => p.ProductId)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var productDtos = products.Select(p => new ProductDto
+            {
+                ProductId = p.ProductId,
+                Code = p.Code,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Stock = p.Stock,
+                IsActive = p.IsActive
+            }).ToList();
+
+            return new PagedResult<ProductDto>
+            {
+                Items = productDtos,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
         }
 
         public async Task AddAsync(ProductCreateDto productDto)

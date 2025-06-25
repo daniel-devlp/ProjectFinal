@@ -1,6 +1,8 @@
-﻿using Project.Application.Dtos;
+﻿using Microsoft.EntityFrameworkCore;
+using Project.Application.Dtos;
 using Project.Domain.Entities;
 using Project.Domain.Interfaces;
+using Project.Infrastructure.Frameworks.EntityFramework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,9 +14,10 @@ namespace Project.Application.Services
     public class ClientServices : IClientServices
     {
         private readonly IClientRepository _clientRepository;
-
-        public ClientServices(IClientRepository clientRepository)
+        private readonly ApplicationDBContext _context;
+        public ClientServices(IClientRepository clientRepository, ApplicationDBContext context)
         {
+            _context = context ?? throw new ArgumentNullException(nameof(context));
             _clientRepository = clientRepository ?? throw new ArgumentNullException(nameof(clientRepository));
         }
 
@@ -34,18 +37,63 @@ namespace Project.Application.Services
             return client != null ? MapToDto(client) : null;
         }
 
-        public async Task<IEnumerable<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
+        public async Task<PagedResult<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var clients = await _clientRepository.GetAllAsync(pageNumber, pageSize, searchTerm?.Trim());
-            return clients?.Select(MapToDto) ?? Enumerable.Empty<ClientDto>();
+            var query = _context.Clients.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                string term = searchTerm.Trim().ToLower();
+                query = query.Where(c =>
+                    (c.FirstName != null && c.FirstName.ToLower().Contains(term)) ||
+                    (c.LastName != null && c.LastName.ToLower().Contains(term)) ||
+                    (c.IdentificationNumber != null && c.IdentificationNumber.ToLower().Contains(term)) ||
+                    (c.Email != null && c.Email.ToLower().Contains(term)) ||
+                    (c.Phone != null && c.Phone.ToLower().Contains(term)) ||
+                    (c.Address != null && c.Address.ToLower().Contains(term))
+                );
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var clients = await query
+                .OrderBy(c => c.ClientId)
+                .ThenBy(c => c.LastName)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var clientDtos = clients.Select(c => new ClientDto
+            {
+                ClientId = c.ClientId,
+                IdentificationNumber = c.IdentificationNumber,
+                FirstName = c.FirstName,
+                LastName = c.LastName,
+                Phone = c.Phone,
+                Email = c.Email,
+                Address = c.Address
+            }).ToList();
+
+            return new PagedResult<ClientDto>
+            {
+                Items = clientDtos,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
         }
 
         public async Task AddAsync(ClientCreateDto clientDto)
         {
             if (clientDto == null) throw new ArgumentNullException(nameof(clientDto));
+
+            // Validación de cédula (asumiendo que solo aplica para cédulas ecuatorianas)
+            if (clientDto.IdentificationType == "CED" && !VerificaCedula(clientDto.IdentificationNumber))
+                throw new InvalidOperationException("El número de cédula no es válido.");
 
             // Validación de unicidad
             if (await _clientRepository.ExistsAsync(clientDto.IdentificationNumber))
@@ -63,6 +111,34 @@ namespace Project.Application.Services
             };
 
             await _clientRepository.AddAsync(client);
+        }
+
+        private bool VerificaCedula(string identificationNumber)
+        {
+            int isNumeric;
+            var total = 0;
+            const int tamanoLongitudCedula = 10;
+            int[] coeficientes = { 2, 1, 2, 1, 2, 1, 2, 1, 2 };
+            const int numeroProvincias = 24;
+            const int tercerDigito = 6;
+
+            if (int.TryParse(identificationNumber, out isNumeric) && identificationNumber.Length == tamanoLongitudCedula)
+            {
+                var provincia = Convert.ToInt32(string.Concat(identificationNumber[0], identificationNumber[1], string.Empty));
+                var digitoTres = Convert.ToInt32(identificationNumber[2] + string.Empty);
+                if ((provincia > 0 && provincia <= numeroProvincias) && digitoTres < tercerDigito)
+                {
+                    var digitoVerificadorRecibido = Convert.ToInt32(identificationNumber[9] + string.Empty);
+                    for (var k = 0; k < coeficientes.Length; k++)
+                    {
+                        var valor = Convert.ToInt32(coeficientes[k] + string.Empty) * Convert.ToInt32(identificationNumber[k] + string.Empty);
+                        total = valor >= 10 ? total + (valor - 9) : total + valor;
+                    }
+                    var digitoVerificadorObtenido = total >= 10 ? (total % 10) != 0 ? 10 - (total % 10) : (total % 10) : total;
+                    return digitoVerificadorObtenido == digitoVerificadorRecibido;
+                }
+            }
+            return false;
         }
 
         public async Task UpdateAsync(ClientUpdateDto clientDto)

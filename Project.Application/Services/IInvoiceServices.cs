@@ -11,7 +11,7 @@ namespace Project.Application.Services
     public interface IInvoiceServices
     {
         Task<InvoiceDto> GetByIdAsync(int id);
-        Task<IEnumerable<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
+        Task<PagedResult<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
         Task AddAsync(InvoiceCreateDto invoiceDto);
         Task UpdateAsync(InvoiceUpdateDto invoiceDto);
         Task DeleteAsync(int id);

@@ -62,7 +62,7 @@ namespace Api
                     ClockSkew = TimeSpan.Zero
                 };
             });
-
+            builder.WebHost.UseUrls("https://0.0.0.0:44306", "http://0.0.0.0:44305");
             // App services
             builder.Services.AddScoped<IClientRepository, ClientRepository>();
             builder.Services.AddScoped<IProductRepository, ProductRepository>();

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Project.Application.Dtos;
 using Project.Application.Services;
 using Project.Domain.Entities;
@@ -18,6 +19,7 @@ namespace Api.Controllers
         }
 
         [HttpGet("{id}")]
+        [Authorize(Roles = "Administrator,user")]
         public async Task<IActionResult> GetById(int id)
         {
             var product = await _productService.GetByIdAsync(id);
@@ -26,6 +28,7 @@ namespace Api.Controllers
         }
 
         [HttpGet]
+        [Authorize(Roles = "Administrator,user")]
         public async Task<IActionResult> GetAll(int pageNumber = 1, int pageSize = 10, string? searchTerm = null)
         {
             var products = await _productService.GetAllAsync(pageNumber, pageSize, searchTerm);
@@ -33,6 +36,7 @@ namespace Api.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Create([FromBody] ProductCreateDto product)
         {
             await _productService.AddAsync(product);
@@ -42,6 +46,7 @@ namespace Api.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Update(int id, [FromBody] ProductUpdateDto product)
         {
             if (id != product.ProductId) return BadRequest();
@@ -50,6 +55,7 @@ namespace Api.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Delete(int id)
         {
             await _productService.DeleteAsync(id);

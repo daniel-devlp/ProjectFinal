@@ -12,7 +12,7 @@ namespace Project.Application.Services
     {
         Task<ClientDto> GetByIdAsync(int id);
         Task<ClientDto> GetByIdentificationAsync(string identification);
-        Task<IEnumerable<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
+        Task<PagedResult<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
         Task AddAsync(ClientCreateDto clientDto);
         Task UpdateAsync(ClientUpdateDto clientDto);
         Task DeleteAsync(int id);

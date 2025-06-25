@@ -34,6 +34,7 @@ namespace Api.Controllers
             {
                 Id = u.Id,
                 UserName = u.UserName,
+                IdentificationNumber=u.Identification,
                 Email = u.Email,
                 EmailConfirmed = u.EmailConfirmed,
                 Roles = _userManager.GetRolesAsync(u).Result,
@@ -162,7 +163,7 @@ namespace Api.Controllers
 
         // Normal user: Get own profile
         [HttpGet("me")]
-        [Authorize(Roles = "Administrator,User")]
+        [Authorize(Roles = "Administrator,user")]
         public async Task<ActionResult<UserDto>> GetMyProfile()
         {
             string userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;

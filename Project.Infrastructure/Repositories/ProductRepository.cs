@@ -38,6 +38,7 @@ namespace Project.Infrastructure.Repositories
             var query = _context.Products.AsQueryable();
             if (!string.IsNullOrWhiteSpace(searchTerm))
                 query = query.Where(p => p.Name.Contains(searchTerm) || p.Code.Contains(searchTerm) || p.Description.Contains(searchTerm));
+            
             return await query
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)

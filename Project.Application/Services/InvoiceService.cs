@@ -33,15 +33,91 @@ namespace Project.Application.Services
             return invoice != null ? ToInvoiceDto(invoice) : null;
         }
 
-        public async Task<IEnumerable<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
+        public async Task<PagedResult<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var invoices = await _invoiceRepository.GetAllAsync(pageNumber, pageSize, searchTerm?.Trim());
-            return invoices?.Select(ToInvoiceDto) ?? Enumerable.Empty<InvoiceDto>();
-        }
+            var query = _context.Invoices
+                .Include(i => i.Client)
+                .Include(i => i.InvoiceDetails)
+                    .ThenInclude(d => d.Product)
+                .AsQueryable();
 
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                string term = searchTerm.Trim().ToLower();
+                query = query.Where(i =>
+                    i.InvoiceNumber.ToLower().Contains(term) ||
+                    i.UserId.ToLower().Contains(term) ||
+                    i.Client.FirstName.ToLower().Contains(term) ||
+                    i.Client.LastName.ToLower().Contains(term) ||
+                    (i.Observations != null && i.Observations.ToLower().Contains(term)) ||
+                    i.InvoiceDetails.Any(d =>
+                        d.Product.Name.ToLower().Contains(term) ||
+                        d.Product.Code.ToLower().Contains(term)
+                    )
+                );
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var invoices = await query
+                .OrderByDescending(i => i.IssueDate)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var invoiceDtos = invoices.Select(i => new InvoiceDto
+            {
+                InvoiceId = i.InvoiceId,
+                InvoiceNumber = i.InvoiceNumber,
+                ClientId = i.ClientId,
+                UserId = i.UserId,
+                IssueDate = i.IssueDate,
+                Subtotal = i.Subtotal,
+                Tax = i.Tax,
+                Total = i.Total,
+                Observations = i.Observations,
+                Client = i.Client == null ? null : new ClientDto
+                {
+                    ClientId = i.Client.ClientId,
+                    IdentificationNumber = i.Client.IdentificationNumber,
+                    FirstName = i.Client.FirstName,
+                    LastName = i.Client.LastName,
+                    Phone = i.Client.Phone,
+                    Email = i.Client.Email,
+                    Address = i.Client.Address
+                },
+                InvoiceDetails = i.InvoiceDetails?.Select(d => new InvoiceDetailDto
+                {
+                    InvoiceDetailId = d.InvoiceDetailId,
+                    InvoiceId = d.InvoiceID,
+                    ProductId = d.ProductID,
+                    Quantity = d.Quantity,
+                    UnitPrice = d.UnitPrice,
+                    Product = d.Product == null ? null : new ProductDto
+                    {
+                        ProductId = d.Product.ProductId,
+                        Code = d.Product.Code,
+                        Name = d.Product.Name,
+                        Description = d.Product.Description,
+                        Price = d.Product.Price,
+                        Stock = d.Product.Stock,
+                        IsActive = d.Product.IsActive
+                    }
+                }).ToList()
+            }).ToList();
+
+            return new PagedResult<InvoiceDto>
+            {
+                Items = invoiceDtos,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+        }
         public async Task AddAsync(InvoiceCreateDto invoiceDto)
         {
             if (invoiceDto == null) throw new ArgumentNullException(nameof(invoiceDto));

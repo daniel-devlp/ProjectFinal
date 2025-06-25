@@ -30,12 +30,27 @@ namespace Project.Infrastructure.Repositories
 
         public async Task<IEnumerable<Client>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
         {
+            if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
+            if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
+
             var query = _context.Clients.AsQueryable();
+
             if (!string.IsNullOrWhiteSpace(searchTerm))
-                query = query.Where(c => c.FirstName.Contains(searchTerm) || c.IdentificationNumber.Contains(searchTerm) || c.LastName.Contains(searchTerm));
+            {
+                var term = searchTerm.Trim().ToLower();
+                query = query.Where(c =>
+                    (c.FirstName != null && c.FirstName.ToLower().Contains(term)) ||
+                    (c.LastName != null && c.LastName.ToLower().Contains(term)) ||
+                    (c.IdentificationNumber != null && c.IdentificationNumber.ToLower().Contains(term))
+                );
+            }
+
             return await query
+                .OrderBy(c => c.FirstName)
+                .ThenBy(c => c.LastName)
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
+                .AsNoTracking()
                 .ToListAsync();
         }
 

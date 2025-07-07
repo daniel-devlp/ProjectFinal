@@ -13,6 +13,7 @@ namespace Project.Infrastructure.Frameworks.Identity
         public bool IsBlocked { get; set; }
         public DateTime? BlockedUntil { get; set; }
         public int FailedLoginAttempts { get; set; }
+        public ICollection<UserPasswordHistory> PasswordHistories { get; set; } = new List<UserPasswordHistory>();
         // Additional properties can be added here as needed
     }
     

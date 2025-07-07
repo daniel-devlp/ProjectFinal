@@ -37,7 +37,8 @@ namespace Api
                 options.Lockout.AllowedForNewUsers = true;
             })
                 .AddEntityFrameworkStores<ApplicationDBContext>()
-                .AddDefaultTokenProviders();
+                .AddDefaultTokenProviders()
+                .AddPasswordValidator<CustomPasswordValidator>(); // Agregar validador personalizado
 
             // JWT Configuration
             var jwtSettings = builder.Configuration.GetSection("Jwt");
@@ -70,6 +71,10 @@ namespace Api
             builder.Services.AddScoped<IClientServices, ClientServices>();
             builder.Services.AddScoped<IProductServices, ProductService>();
             builder.Services.AddScoped<IInvoiceServices, InvoiceService>();
+
+            // Servicios para historial de contraseñas
+            builder.Services.AddScoped<PasswordHistoryService>();
+            builder.Services.AddScoped<CustomPasswordValidator>();
 
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();

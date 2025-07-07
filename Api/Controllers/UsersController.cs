@@ -17,11 +17,16 @@ namespace Api.Controllers
     {
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<ApplicationRole> _roleManager;
+        private readonly PasswordHistoryService _passwordHistoryService;
 
-        public UsersController(UserManager<ApplicationUser> userManager, RoleManager<ApplicationRole> roleManager)
+        public UsersController(
+            UserManager<ApplicationUser> userManager,
+            RoleManager<ApplicationRole> roleManager,
+            PasswordHistoryService passwordHistoryService)
         {
             _userManager = userManager;
             _roleManager = roleManager;
+            _passwordHistoryService = passwordHistoryService;
         }
 
         // Admin: List all users
@@ -34,7 +39,7 @@ namespace Api.Controllers
             {
                 Id = u.Id,
                 UserName = u.UserName,
-                IdentificationNumber=u.Identification,
+                IdentificationNumber = u.Identification,
                 Email = u.Email,
                 EmailConfirmed = u.EmailConfirmed,
                 Roles = _userManager.GetRolesAsync(u).Result,
@@ -80,6 +85,9 @@ namespace Api.Controllers
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 
+            // Agregar la contraseña inicial al historial
+            await _passwordHistoryService.AddPasswordToHistoryAsync(user.Id, user.PasswordHash);
+
             if (dto.Roles != null && dto.Roles.Any())
             {
                 foreach (var role in dto.Roles)
@@ -101,62 +109,147 @@ namespace Api.Controllers
             return CreatedAtAction(nameof(GetUser), new { id = user.Id }, response);
         }
 
-        // Admin: Update user
+        // Update user (Admin or own profile)
         [HttpPut("{id}")]
-        [Authorize(Roles = "Administrator")]
-        public async Task<ActionResult> UpdateUser(string id, [FromBody] UserUpdateDto dto)
+        [Authorize(Roles = "Administrator,user")]
+        public async Task<ActionResult> UpdateUser(string id, [FromBody] UserUpdateWithPasswordDto dto)
         {
             if (id != dto.Id) return BadRequest("ID mismatch");
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null) return NotFound("User not found");
 
-            // Update basic user properties
-            user.UserName = dto.UserName;
-            user.Email = dto.Email;
-            user.EmailConfirmed = dto.EmailConfirmed;
+            // Get current user info
+            string currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            bool isAdmin = User.IsInRole("Administrator");
+            bool isOwner = currentUserId == id;
 
-            // Update password if provided
-            if (!string.IsNullOrEmpty(dto.Password))
+            // Authorization check: Admin can update any user, regular users can only update themselves
+            if (!isAdmin && !isOwner)
             {
-                // Remove current password and set new one
-                var removePasswordResult = await _userManager.RemovePasswordAsync(user);
-                if (!removePasswordResult.Succeeded)
-                    return BadRequest(removePasswordResult.Errors);
-
-                var addPasswordResult = await _userManager.AddPasswordAsync(user, dto.Password);
-                if (!addPasswordResult.Succeeded)
-                    return BadRequest(addPasswordResult.Errors);
+                return Forbid("No tienes permisos para actualizar este usuario.");
             }
 
-            // Update lockout status
-            user.LockoutEnd = dto.IsLocked ? System.DateTimeOffset.MaxValue : (System.DateTimeOffset?)null;
+            // Update basic user properties (Admin or own profile)
+            if (isAdmin || isOwner)
+            {
+                user.UserName = dto.UserName;
+                user.Email = dto.Email;
+
+                // Only admin can change email confirmation status
+                if (isAdmin)
+                {
+                    user.EmailConfirmed = dto.EmailConfirmed;
+                }
+            }
+
+            // Handle password change
+            if (!string.IsNullOrEmpty(dto.NewPassword))
+            {
+                // For regular users, current password is required
+                if (!isAdmin && string.IsNullOrEmpty(dto.CurrentPassword))
+                {
+                    return BadRequest(new PasswordValidationErrorDto
+                    {
+                        ErrorCode = "CURRENT_PASSWORD_REQUIRED",
+                        Message = "La contraseña actual es requerida.",
+                        Errors = new List<string> { "Debes proporcionar tu contraseña actual para cambiarla." }
+                    });
+                }
+
+                // Verify current password for non-admin users
+                if (!isAdmin)
+                {
+                    var passwordValid = await _userManager.CheckPasswordAsync(user, dto.CurrentPassword);
+                    if (!passwordValid)
+                    {
+                        return BadRequest(new PasswordValidationErrorDto
+                        {
+                            ErrorCode = "INVALID_CURRENT_PASSWORD",
+                            Message = "La contraseña actual es incorrecta.",
+                            Errors = new List<string> { "La contraseña actual proporcionada no es válida." }
+                        });
+                    }
+                }
+
+                // Check if new password was previously used
+                var isPasswordReused = await _passwordHistoryService.IsPasswordReusedAsync(user.Id, dto.NewPassword);
+                if (isPasswordReused)
+                {
+                    return BadRequest(new PasswordValidationErrorDto
+                    {
+                        ErrorCode = "PASSWORD_PREVIOUSLY_USED",
+                        Message = "No puedes reutilizar una de tus contraseñas anteriores.",
+                        Errors = new List<string> { "La contraseña ingresada ya ha sido utilizada anteriormente." }
+                    });
+                }
+
+                // Change password
+                IdentityResult passwordResult;
+                if (isAdmin)
+                {
+                    // Admin can reset password without current password
+                    var removePasswordResult = await _userManager.RemovePasswordAsync(user);
+                    if (!removePasswordResult.Succeeded)
+                        return BadRequest(removePasswordResult.Errors);
+
+                    passwordResult = await _userManager.AddPasswordAsync(user, dto.NewPassword);
+                }
+                else
+                {
+                    // Regular user must provide current password
+                    passwordResult = await _userManager.ChangePasswordAsync(user, dto.CurrentPassword, dto.NewPassword);
+                }
+
+                if (!passwordResult.Succeeded)
+                {
+                    return BadRequest(new PasswordValidationErrorDto
+                    {
+                        ErrorCode = "PASSWORD_CHANGE_FAILED",
+                        Message = "Error al cambiar la contraseña.",
+                        Errors = passwordResult.Errors.Select(e => e.Description).ToList()
+                    });
+                }
+
+                // Add new password to history
+                await _passwordHistoryService.AddPasswordToHistoryAsync(user.Id, user.PasswordHash);
+            }
+
+            // Admin-only operations
+            if (isAdmin)
+            {
+                // Update lockout status
+                user.LockoutEnd = dto.IsLocked ? System.DateTimeOffset.MaxValue : (System.DateTimeOffset?)null;
+
+                // Update roles
+                if (dto.Roles != null)
+                {
+                    var userRoles = await _userManager.GetRolesAsync(user);
+                    var rolesToAdd = dto.Roles.Except(userRoles).ToList();
+                    var rolesToRemove = userRoles.Except(dto.Roles).ToList();
+
+                    if (rolesToAdd.Any())
+                    {
+                        var addRolesResult = await _userManager.AddToRolesAsync(user, rolesToAdd);
+                        if (!addRolesResult.Succeeded)
+                            return BadRequest(addRolesResult.Errors);
+                    }
+
+                    if (rolesToRemove.Any())
+                    {
+                        var removeRolesResult = await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
+                        if (!removeRolesResult.Succeeded)
+                            return BadRequest(removeRolesResult.Errors);
+                    }
+                }
+            }
 
             // Update user
             var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 
-            // Update roles
-            var userRoles = await _userManager.GetRolesAsync(user);
-            var rolesToAdd = dto.Roles.Except(userRoles).ToList();
-            var rolesToRemove = userRoles.Except(dto.Roles).ToList();
-
-            if (rolesToAdd.Any())
-            {
-                var addRolesResult = await _userManager.AddToRolesAsync(user, rolesToAdd);
-                if (!addRolesResult.Succeeded)
-                    return BadRequest(addRolesResult.Errors);
-            }
-
-            if (rolesToRemove.Any())
-            {
-                var removeRolesResult = await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
-                if (!removeRolesResult.Succeeded)
-                    return BadRequest(removeRolesResult.Errors);
-            }
-
-            return NoContent();
+            return Ok(new { message = "Usuario actualizado exitosamente." });
         }
 
         // Admin: Delete user

@@ -21,14 +21,26 @@ namespace Project.Infrastructure.Frameworks.EntityFramework
         public DbSet<Product> Products { get; set; }  
         public DbSet<InvoiceDetail> InvoiceDetails { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
+        
+        // DbSet para el historial de contraseñas
+        public DbSet<UserPasswordHistory> UserPasswordHistories { get; set; }
 
         
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            // Additional model configurations can go here
+            
+            // Configurar la relación entre ApplicationUser y UserPasswordHistory
+            modelBuilder.Entity<UserPasswordHistory>()
+                .HasOne(ph => ph.User)
+                .WithMany(u => u.PasswordHistories)
+                .HasForeignKey(ph => ph.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            
+            // Índice para mejorar el rendimiento
+            modelBuilder.Entity<UserPasswordHistory>()
+                .HasIndex(ph => new { ph.UserId, ph.CreatedAt });
         }
     }
-    
-    }
+}
 

@@ -18,10 +18,18 @@ namespace Api
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Database Context
+            // SQL Server Database Context (actual)
             builder.Services.AddDbContext<ApplicationDBContext>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
             );
+
+            // PostgreSQL Database Context (preparado para futura migración - comentado)
+            /*
+            builder.Services.AddDbContext<ApplicationDBContext>(options =>
+                options.UseNpgsql(builder.Configuration.GetConnectionString("PostgreSQLConnection"),
+                    b => b.MigrationsAssembly("Project.Infrastructure"))
+            );
+            */
 
             // Identity configuration
             builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
@@ -36,13 +44,15 @@ namespace Api
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
                 options.Lockout.AllowedForNewUsers = true;
             })
+                
                 .AddEntityFrameworkStores<ApplicationDBContext>()
                 .AddDefaultTokenProviders()
-                .AddPasswordValidator<CustomPasswordValidator>(); // Agregar validador personalizado
+                .AddPasswordValidator<CustomPasswordValidator>();
 
             // JWT Configuration
             var jwtSettings = builder.Configuration.GetSection("Jwt");
-            var key = Encoding.UTF8.GetBytes(jwtSettings["Key"] ?? "F2C7#9z8l8$4b6@e5!r2v7w1q3x6n4u3p0s9d7");
+            var key = Encoding.UTF8.GetBytes(jwtSettings["Key"] ?? 
+                "F2C7#9z8l8$4b6@e5!r2v7w1q3x6n4u3p0s9d7mZ8kL4nQ1tY6wE9rT2yU5iO0pA3sD6fG9hJ2kL5nM8bV1cX4zQ7w");
 
             builder.Services.AddAuthentication(options =>
             {
@@ -64,41 +74,40 @@ namespace Api
                 };
             });
             
-            // App services
+            // Dependency Injection - Clean Architecture
+            builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
             builder.Services.AddScoped<IClientRepository, ClientRepository>();
             builder.Services.AddScoped<IProductRepository, ProductRepository>();
             builder.Services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+
+            // Application Services
             builder.Services.AddScoped<IClientServices, ClientServices>();
             builder.Services.AddScoped<IProductServices, ProductService>();
             builder.Services.AddScoped<IInvoiceServices, InvoiceService>();
 
-            // Servicios para historial de contraseñas
+            // Infrastructure Services
             builder.Services.AddScoped<PasswordHistoryService>();
             builder.Services.AddScoped<CustomPasswordValidator>();
+            //
+        
 
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
 
-            // CORS (optional, allow all for dev)
-            builder.Services.AddCors(options =>
-            {
-                options.AddPolicy("AllowAll", builder =>
-                {
-                    builder.AllowAnyOrigin()
-                           .AllowAnyMethod()
-                           .AllowAnyHeader();
-                });
-            });
+            // Configure Swagger
             builder.Services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Your API", Version = "v1" });
+                c.SwaggerDoc("v1", new OpenApiInfo 
+                { 
+                    Title = "ProjectFinal API", 
+                    Version = "v1",
+                    Description = "Clean Architecture API with SQL Server (PostgreSQL ready)"
+                });
 
-                // --- Configuración JWT Bearer ---
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
                 {
-                    Description = @"JWT Authorization header using the Bearer scheme.  
-                        Escribe: 'Bearer {token}' (incluye la palabra Bearer y un espacio antes del token)",
+                    Description = @"JWT Authorization header using the Bearer scheme. 
+                        Enter: 'Bearer {token}' (include the word Bearer and a space before the token)",
                     Name = "Authorization",
                     In = ParameterLocation.Header,
                     Type = SecuritySchemeType.ApiKey,
@@ -106,35 +115,51 @@ namespace Api
                 });
 
                 c.AddSecurityRequirement(new OpenApiSecurityRequirement()
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
                 {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                },
-                Scheme = "oauth2",
-                Name = "Bearer",
-                In = ParameterLocation.Header,
-            },
-            new List<string>()
-        }
-    });
+                    {
+                        new OpenApiSecurityScheme
+                        {
+                            Reference = new OpenApiReference
+                            {
+                                Type = ReferenceType.SecurityScheme,
+                                Id = "Bearer"
+                            },
+                            Scheme = "oauth2",
+                            Name = "Bearer",
+                            In = ParameterLocation.Header,
+                        },
+                        new List<string>()
+                    }
+                });
+            });
+
+            // CORS
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowAll", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
             });
 
             var app = builder.Build();
 
+            // Configure pipeline
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
-                app.UseSwaggerUI();
+                app.UseSwaggerUI(c =>
+                {
+                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ProjectFinal API V1");
+                });
             }
-            app.UseCors("AllowAll");
-            app.UseAuthentication(); // JWT!
-            app.UseAuthorization();
 
+            app.UseHttpsRedirection();
+            app.UseCors("AllowAll");
+            app.UseAuthentication();
+            app.UseAuthorization();
             app.MapControllers();
 
             app.Run();

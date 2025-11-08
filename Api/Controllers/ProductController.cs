@@ -36,7 +36,7 @@ namespace Api.Controllers
         }
 
         [HttpPost]
-        [Authorize(Roles = "Administrator")]
+        //[Authorize(Roles = "Administrator")]
         public async Task<IActionResult> Create([FromBody] ProductCreateDto product)
         {
             await _productService.AddAsync(product);

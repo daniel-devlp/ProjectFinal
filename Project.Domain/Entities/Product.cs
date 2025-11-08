@@ -15,6 +15,7 @@ namespace Project.Domain.Entities
         public decimal Price { get; set; }
         public int Stock { get; set; } = 0;
         public bool IsActive { get; set; } = true;
+        public string ImageUri { get; set; }
         public virtual ICollection<InvoiceDetail> InvoiceDetails { get; set; } = new HashSet<InvoiceDetail>();
     }
 }

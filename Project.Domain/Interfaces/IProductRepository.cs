@@ -7,23 +7,17 @@ using System.Threading.Tasks;
 
 namespace Project.Domain.Interfaces
 {
-    public interface IProductRepository
+    public interface IProductRepository : IRepository<Product>
     {
-        Task<Product> GetByIdAsync(int id);
-        Task<IEnumerable<Product>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
-        Task<IEnumerable<Product>> GetAllWithStockAsync(int pageNumber, int pageSize, string searchTerm = null);
-        Task<IEnumerable<Product>> GetAvailableProductsAsync(int pageNumber, int pageSize, string searchTerm = null); // <-- ESTE DEBES AGREGAR
-        Task AddAsync(Product product);
-        Task UpdateAsync(Product product);
-        Task DeleteAsync(int id);
-        Task<bool> ExistsByIdAsync(int id);
-        Task<bool> ExistsAsync(string code);
-        Task<int> CountAsync(string searchTerm = null);
-
-        // Métodos de stock adicionales sugeridos:
         Task<Product> GetByCodeAsync(string code);
+        Task<(IEnumerable<Product> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize, string searchTerm = null);
+        Task<(IEnumerable<Product> Items, int TotalCount)> GetAvailableProductsAsync(
+            int pageNumber, int pageSize, string searchTerm = null);
         Task<bool> HasStockAsync(int productId, int quantity);
         Task DecreaseStockAsync(int productId, int quantity);
         Task IncreaseStockAsync(int productId, int quantity);
+        Task<bool> ExistsByCodeAsync(string code);
+        Task<bool> ExistsByIdAsync(int productId);
     }
 }

@@ -1,32 +1,23 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Project.Application.Dtos;
+﻿using Project.Application.Dtos;
 using Project.Domain.Entities;
 using Project.Domain.Interfaces;
-using Project.Infrastructure.Frameworks.EntityFramework;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Project.Application.Services
 {
     public class ProductService : IProductServices
     {
-        private readonly IProductRepository _productRepository;
-        private readonly ApplicationDBContext _context;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public ProductService(IProductRepository productRepository,ApplicationDBContext context )
+        public ProductService(IUnitOfWork unitOfWork)
         {
-            _context = context ?? throw new ArgumentNullException(nameof(context));
-            _productRepository = productRepository ?? throw new ArgumentNullException(nameof(productRepository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
         public async Task<ProductDto> GetByIdAsync(int id)
         {
             if (id <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(id));
 
-            var product = await _productRepository.GetByIdAsync(id);
+            var product = await _unitOfWork.Products.GetByIdAsync(id);
             return product != null ? ToProductDto(product) : null;
         }
 
@@ -34,7 +25,7 @@ namespace Project.Application.Services
         {
             if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Product code is required.", nameof(code));
 
-            var product = await _productRepository.GetByCodeAsync(code.Trim());
+            var product = await _unitOfWork.Products.GetByCodeAsync(code.Trim());
             return product != null ? ToProductDto(product) : null;
         }
 
@@ -43,37 +34,9 @@ namespace Project.Application.Services
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var query = _context.Products.AsQueryable();
+            var (products, totalCount) = await _unitOfWork.Products.GetPagedAsync(pageNumber, pageSize, searchTerm);
 
-            if (!string.IsNullOrWhiteSpace(searchTerm))
-            {
-                string term = searchTerm.Trim().ToLower();
-                query = query.Where(p =>
-                    (p.Name != null && p.Name.ToLower().Contains(term)) ||
-                    (p.Code != null && p.Code.ToLower().Contains(term)) ||
-                    (p.Description != null && p.Description.ToLower().Contains(term))
-                );
-            }
-
-            var totalCount = await query.CountAsync();
-
-            var products = await query
-                .OrderBy(p => p.ProductId)
-                .Skip((pageNumber - 1) * pageSize)
-                .Take(pageSize)
-                .AsNoTracking()
-                .ToListAsync();
-
-            var productDtos = products.Select(p => new ProductDto
-            {
-                ProductId = p.ProductId,
-                Code = p.Code,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Price,
-                Stock = p.Stock,
-                IsActive = p.IsActive
-            }).ToList();
+            var productDtos = products.Select(ToProductDto).ToList();
 
             return new PagedResult<ProductDto>
             {
@@ -93,7 +56,7 @@ namespace Project.Application.Services
             if (productDto.Stock < 0) throw new ArgumentException("Stock cannot be negative.", nameof(productDto.Stock));
 
             // Check uniqueness
-            if (await _productRepository.ExistsAsync(productDto.Code.Trim()))
+            if (await _unitOfWork.Products.ExistsByCodeAsync(productDto.Code.Trim()))
                 throw new InvalidOperationException("A product with this code already exists.");
 
             var product = new Product
@@ -103,9 +66,12 @@ namespace Project.Application.Services
                 Description = productDto.Description?.Trim(),
                 Price = productDto.Price,
                 Stock = productDto.Stock,
-                IsActive = true
+                IsActive = true,
+                ImageUri = productDto.ImageUri
             };
-            await _productRepository.AddAsync(product);
+
+            await _unitOfWork.Products.AddAsync(product);
+            await _unitOfWork.SaveChangesAsync();
         }
 
         public async Task UpdateAsync(ProductUpdateDto productDto)
@@ -117,14 +83,14 @@ namespace Project.Application.Services
             if (productDto.Price < 0) throw new ArgumentException("Price cannot be negative.", nameof(productDto.Price));
             if (productDto.Stock < 0) throw new ArgumentException("Stock cannot be negative.", nameof(productDto.Stock));
 
-            var existingProduct = await _productRepository.GetByIdAsync(productDto.ProductId);
+            var existingProduct = await _unitOfWork.Products.GetByIdAsync(productDto.ProductId);
             if (existingProduct == null)
                 throw new InvalidOperationException("Product does not exist.");
 
             // If code is changed, check uniqueness
             if (!string.Equals(existingProduct.Code, productDto.Code, StringComparison.OrdinalIgnoreCase))
             {
-                if (await _productRepository.ExistsAsync(productDto.Code.Trim()))
+                if (await _unitOfWork.Products.ExistsByCodeAsync(productDto.Code.Trim()))
                     throw new InvalidOperationException("A product with this code already exists.");
             }
 
@@ -135,29 +101,35 @@ namespace Project.Application.Services
             existingProduct.Stock = productDto.Stock;
             existingProduct.IsActive = productDto.IsActive;
 
-            await _productRepository.UpdateAsync(existingProduct);
+            _unitOfWork.Products.Update(existingProduct);
+            await _unitOfWork.SaveChangesAsync();
         }
 
         public async Task DeleteAsync(int id)
         {
             if (id <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(id));
 
-            var product = await _productRepository.GetByIdAsync(id);
+            var product = await _unitOfWork.Products.GetByIdAsync(id);
             if (product == null)
                 throw new InvalidOperationException("Product does not exist.");
 
-            await _productRepository.DeleteAsync(id);
+            _unitOfWork.Products.Remove(product);
+            await _unitOfWork.SaveChangesAsync();
         }
 
         public Task<bool> ExistsAsync(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Product code is required.", nameof(code));
-            return _productRepository.ExistsAsync(code.Trim());
+            return _unitOfWork.Products.ExistsByCodeAsync(code.Trim());
         }
 
-        public Task<int> CountAsync(string searchTerm = null)
+        public async Task<int> CountAsync(string searchTerm = null)
         {
-            return _productRepository.CountAsync(searchTerm?.Trim());
+            return await _unitOfWork.Products.CountAsync(p => 
+                string.IsNullOrEmpty(searchTerm) || 
+                p.Name.Contains(searchTerm) || 
+                p.Code.Contains(searchTerm) || 
+                p.Description.Contains(searchTerm));
         }
 
         public async Task<IEnumerable<ProductDto>> GetAvailableProductsAsync(int pageNumber, int pageSize, string searchTerm = null)
@@ -165,7 +137,7 @@ namespace Project.Application.Services
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var products = await _productRepository.GetAvailableProductsAsync(pageNumber, pageSize, searchTerm?.Trim());
+            var (products, _) = await _unitOfWork.Products.GetAvailableProductsAsync(pageNumber, pageSize, searchTerm?.Trim());
             return products?.Select(ToProductDto) ?? Enumerable.Empty<ProductDto>();
         }
 
@@ -173,7 +145,7 @@ namespace Project.Application.Services
         {
             if (productId <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(productId));
             if (quantity <= 0) throw new ArgumentException("Quantity must be greater than zero.", nameof(quantity));
-            return _productRepository.HasStockAsync(productId, quantity);
+            return _unitOfWork.Products.HasStockAsync(productId, quantity);
         }
 
         // Mapping method

@@ -1,0 +1,1446 @@
+===============================================================================
+                    GUÍA DE REFACTORING A CLEAN ARCHITECTURE
+                        CON MIGRACIÓN A POSTGRESQL
+===============================================================================
+
+ANÁLISIS DEL ESTADO ACTUAL:
+==========================
+
+PROBLEMAS IDENTIFICADOS:
+------------------------
+1. ❌ VIOLACIÓN DE DEPENDENCIAS: Application depende de Infrastructure
+2. ❌ Repository patrón mal implementado (SaveChanges en cada método)
+3. ❌ Falta Unit of Work pattern
+4. ❌ Service Layer accede directamente al DbContext
+5. ❌ Validaciones de negocio mezcladas con lógica de datos
+6. ❌ Falta capa de Presentación (API Controllers muy acoplados)
+7. ❌ No hay interfaces para servicios de dominio
+8. ❌ Configuración de base de datos en capa incorrecta
+
+ESTRUCTURA IDEAL DE CLEAN ARCHITECTURE:
+=====================================
+
+ProjectFinal/
+├── src/
+│   ├── ProjectFinal.Domain/          (Núcleo - Sin dependencias externas)
+│   ├── ProjectFinal.Application/     (Casos de uso - Solo depende de Domain)
+│   ├── ProjectFinal.Infrastructure/  (Implementaciones - Depende de Application/Domain)
+│   └── ProjectFinal.Presentation/    (API/Web - Depende de Application/Infrastructure)
+├── tests/
+└── docs/
+
+===============================================================================
+                           PASO A PASO DETALLADO
+===============================================================================
+
+PASO 1: REESTRUCTURAR PROYECTOS Y DEPENDENCIAS
+=============================================
+
+1.1 ELIMINAR DEPENDENCIA INCORRECTA:
+-----------------------------------
+- Abrir: Project.Application/Project.Application.csproj
+- ELIMINAR la línea:
+  <ProjectReference Include="..\Project.Infrastructure\Project.Infrastructure.csproj" />
+
+1.2 REORGANIZAR ESTRUCTURA DE CARPETAS:
+--------------------------------------
+Crear la siguiente estructura:
+
+src/
+├── ProjectFinal.Domain/
+│   ├── Entities/
+│   ├── ValueObjects/
+│   ├── Interfaces/
+│   ├── Services/
+│   ├── Exceptions/
+│   └── Events/
+├── ProjectFinal.Application/
+│   ├── UseCases/
+│   ├── DTOs/
+│   ├── Interfaces/
+│   ├── Mappers/
+│   ├── Validators/
+│   └── Common/
+├── ProjectFinal.Infrastructure/
+│   ├── Persistence/
+│   ├── Repositories/
+│   ├── Services/
+│   ├── Identity/
+│   └── Configuration/
+└── ProjectFinal.Presentation/
+    ├── Controllers/
+    ├── Middleware/
+    ├── Configuration/
+    └── Models/
+
+===============================================================================
+
+PASO 2: REFACTORIZAR CAPA DE DOMINIO
+===================================
+
+2.1 CREAR EXCEPCIONES DE DOMINIO:
+---------------------------------
+Archivo: ProjectFinal.Domain/Exceptions/DomainException.cs
+
+```csharp
+namespace ProjectFinal.Domain.Exceptions
+{
+    public abstract class DomainException : Exception
+    {
+        protected DomainException(string message) : base(message) { }
+        protected DomainException(string message, Exception innerException) 
+            : base(message, innerException) { }
+    }
+}
+```
+
+Archivo: ProjectFinal.Domain/Exceptions/ClientDomainException.cs
+
+```csharp
+namespace ProjectFinal.Domain.Exceptions
+{
+    public class ClientDomainException : DomainException
+    {
+        public ClientDomainException(string message) : base(message) { }
+    }
+}
+```
+
+2.2 CREAR VALUE OBJECTS:
+-----------------------
+Archivo: ProjectFinal.Domain/ValueObjects/Identification.cs
+
+```csharp
+namespace ProjectFinal.Domain.ValueObjects
+{
+    public class Identification
+    {
+        public string Type { get; private set; }
+        public string Number { get; private set; }
+
+        private Identification() { } // Para EF
+
+        public Identification(string type, string number)
+        {
+            if (string.IsNullOrWhiteSpace(type))
+                throw new ArgumentException("Identification type is required", nameof(type));
+            
+            if (string.IsNullOrWhiteSpace(number))
+                throw new ArgumentException("Identification number is required", nameof(number));
+
+            if (!IsValidEcuadorianCedula(number))
+                throw new ArgumentException("Invalid Ecuadorian cedula", nameof(number));
+
+            Type = type;
+            Number = number;
+        }
+
+        private static bool IsValidEcuadorianCedula(string identificationNumber)
+        {
+            if (!int.TryParse(identificationNumber, out _) || identificationNumber.Length != 10)
+                return false;
+
+            int[] coefficients = { 2, 1, 2, 1, 2, 1, 2, 1, 2 };
+            var province = Convert.ToInt32(identificationNumber.Substring(0, 2));
+            var thirdDigit = Convert.ToInt32(identificationNumber[2].ToString());
+
+            if (province < 1 || province > 24 || thirdDigit >= 6)
+                return false;
+
+            var total = 0;
+            for (var k = 0; k < coefficients.Length; k++)
+            {
+                var value = coefficients[k] * Convert.ToInt32(identificationNumber[k].ToString());
+                total += value >= 10 ? value - 9 : value;
+            }
+
+            var verifierDigit = total >= 10 ? (total % 10) != 0 ? 10 - (total % 10) : 0 : total;
+            return verifierDigit == Convert.ToInt32(identificationNumber[9].ToString());
+        }
+
+        protected bool Equals(Identification other)
+        {
+            return Type == other.Type && Number == other.Number;
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj)) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != this.GetType()) return false;
+            return Equals((Identification)obj);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Type, Number);
+        }
+    }
+}
+```
+
+2.3 REFACTORIZAR ENTIDAD CLIENT:
+------------------------------
+Archivo: ProjectFinal.Domain/Entities/Client.cs
+
+```csharp
+using ProjectFinal.Domain.ValueObjects;
+using ProjectFinal.Domain.Exceptions;
+
+namespace ProjectFinal.Domain.Entities
+{
+    public class Client
+    {
+        public int ClientId { get; private set; }
+        public Identification Identification { get; private set; }
+        public string FirstName { get; private set; }
+        public string LastName { get; private set; }
+        public string Phone { get; private set; }
+        public string Email { get; private set; }
+        public string Address { get; private set; }
+        public DateTime CreatedAt { get; private set; }
+        public DateTime? UpdatedAt { get; private set; }
+
+        // Navigation properties
+        public virtual ICollection<Invoice> Invoices { get; private set; } = new HashSet<Invoice>();
+
+        private Client() { } // Para EF
+
+        public Client(string identificationType, string identificationNumber, 
+                     string firstName, string lastName, string phone, 
+                     string email, string address)
+        {
+            SetIdentification(identificationType, identificationNumber);
+            SetPersonalInfo(firstName, lastName, phone, email, address);
+            CreatedAt = DateTime.UtcNow;
+        }
+
+        public void UpdatePersonalInfo(string firstName, string lastName, 
+                                     string phone, string email, string address)
+        {
+            SetPersonalInfo(firstName, lastName, phone, email, address);
+            UpdatedAt = DateTime.UtcNow;
+        }
+
+        public void UpdateIdentification(string identificationType, string identificationNumber)
+        {
+            SetIdentification(identificationType, identificationNumber);
+            UpdatedAt = DateTime.UtcNow;
+        }
+
+        private void SetIdentification(string type, string number)
+        {
+            try
+            {
+                Identification = new Identification(type, number);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ClientDomainException($"Invalid identification: {ex.Message}");
+            }
+        }
+
+        private void SetPersonalInfo(string firstName, string lastName, 
+                                   string phone, string email, string address)
+        {
+            if (string.IsNullOrWhiteSpace(firstName))
+                throw new ClientDomainException("First name is required");
+
+            if (string.IsNullOrWhiteSpace(lastName))
+                throw new ClientDomainException("Last name is required");
+
+            if (!string.IsNullOrWhiteSpace(email) && !IsValidEmail(email))
+                throw new ClientDomainException("Invalid email format");
+
+            FirstName = firstName.Trim();
+            LastName = lastName.Trim();
+            Phone = phone?.Trim();
+            Email = email?.Trim();
+            Address = address?.Trim();
+        }
+
+        private static bool IsValidEmail(string email)
+        {
+            try
+            {
+                var addr = new System.Net.Mail.MailAddress(email);
+                return addr.Address == email;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public string GetFullName() => $"{FirstName} {LastName}";
+    }
+}
+```
+
+2.4 CREAR INTERFAZ GENÉRICA DE REPOSITORIO:
+------------------------------------------
+Archivo: ProjectFinal.Domain/Interfaces/IRepository.cs
+
+```csharp
+using System.Linq.Expressions;
+
+namespace ProjectFinal.Domain.Interfaces
+{
+    public interface IRepository<T> where T : class
+    {
+        Task<T> GetByIdAsync(int id);
+        Task<IEnumerable<T>> GetAllAsync();
+        Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate);
+        Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate);
+        Task AddAsync(T entity);
+        void Update(T entity);
+        void Remove(T entity);
+        Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
+        Task<int> CountAsync(Expression<Func<T, bool>> predicate = null);
+    }
+}
+```
+
+2.5 CREAR UNIT OF WORK:
+----------------------
+Archivo: ProjectFinal.Domain/Interfaces/IUnitOfWork.cs
+
+```csharp
+namespace ProjectFinal.Domain.Interfaces
+{
+    public interface IUnitOfWork : IDisposable
+    {
+        IClientRepository Clients { get; }
+        IProductRepository Products { get; }
+        IInvoiceRepository Invoices { get; }
+        
+        Task<int> SaveChangesAsync();
+        Task BeginTransactionAsync();
+        Task CommitTransactionAsync();
+        Task RollbackTransactionAsync();
+    }
+}
+```
+
+2.6 REFACTORIZAR INTERFAZ DE CLIENTE:
+-----------------------------------
+Archivo: ProjectFinal.Domain/Interfaces/IClientRepository.cs
+
+```csharp
+using ProjectFinal.Domain.Entities;
+using System.Linq.Expressions;
+
+namespace ProjectFinal.Domain.Interfaces
+{
+    public interface IClientRepository : IRepository<Client>
+    {
+        Task<Client> GetByIdentificationAsync(string identificationNumber);
+        Task<(IEnumerable<Client> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize, string searchTerm = null);
+    }
+}
+```
+
+===============================================================================
+
+PASO 3: REFACTORIZAR CAPA DE APLICACIÓN
+======================================
+
+3.1 CREAR DTOS SIN DEPENDENCIAS DE INFRASTRUCTURE:
+-------------------------------------------------
+Archivo: ProjectFinal.Application/DTOs/Common/PagedResultDto.cs
+
+```csharp
+namespace ProjectFinal.Application.DTOs.Common
+{
+    public class PagedResultDto<T>
+    {
+        public IEnumerable<T> Items { get; set; } = new List<T>();
+        public int TotalCount { get; set; }
+        public int PageNumber { get; set; }
+        public int PageSize { get; set; }
+        public int TotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
+        public bool HasNextPage => PageNumber < TotalPages;
+        public bool HasPreviousPage => PageNumber > 1;
+    }
+}
+```
+
+3.2 CREAR CASOS DE USO:
+---------------------
+Archivo: ProjectFinal.Application/UseCases/Clients/Commands/CreateClientCommand.cs
+
+```csharp
+namespace ProjectFinal.Application.UseCases.Clients.Commands
+{
+    public class CreateClientCommand
+    {
+        public string IdentificationType { get; set; }
+        public string IdentificationNumber { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Phone { get; set; }
+        public string Email { get; set; }
+        public string Address { get; set; }
+    }
+}
+```
+
+Archivo: ProjectFinal.Application/UseCases/Clients/Handlers/CreateClientHandler.cs
+
+```csharp
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Domain.Interfaces;
+using ProjectFinal.Application.UseCases.Clients.Commands;
+using ProjectFinal.Application.DTOs.Clients;
+using ProjectFinal.Application.Interfaces;
+
+namespace ProjectFinal.Application.UseCases.Clients.Handlers
+{
+    public class CreateClientHandler : ICommandHandler<CreateClientCommand, ClientDto>
+    {
+        private readonly IUnitOfWork _unitOfWork;
+
+        public CreateClientHandler(IUnitOfWork unitOfWork)
+        {
+            _unitOfWork = unitOfWork;
+        }
+
+        public async Task<ClientDto> HandleAsync(CreateClientCommand command)
+        {
+            // Verificar si ya existe
+            var exists = await _unitOfWork.Clients.ExistsAsync(
+                c => c.Identification.Number == command.IdentificationNumber);
+            
+            if (exists)
+                throw new InvalidOperationException("Client with this identification already exists");
+
+            // Crear entidad
+            var client = new Client(
+                command.IdentificationType,
+                command.IdentificationNumber,
+                command.FirstName,
+                command.LastName,
+                command.Phone,
+                command.Email,
+                command.Address
+            );
+
+            await _unitOfWork.Clients.AddAsync(client);
+            await _unitOfWork.SaveChangesAsync();
+
+            return new ClientDto
+            {
+                ClientId = client.ClientId,
+                IdentificationType = client.Identification.Type,
+                IdentificationNumber = client.Identification.Number,
+                FirstName = client.FirstName,
+                LastName = client.LastName,
+                Phone = client.Phone,
+                Email = client.Email,
+                Address = client.Address,
+                CreatedAt = client.CreatedAt
+            };
+        }
+    }
+}
+```
+
+3.3 CREAR INTERFACES PARA HANDLERS:
+----------------------------------
+Archivo: ProjectFinal.Application/Interfaces/ICommandHandler.cs
+
+```csharp
+namespace ProjectFinal.Application.Interfaces
+{
+    public interface ICommandHandler<TCommand, TResult>
+    {
+        Task<TResult> HandleAsync(TCommand command);
+    }
+
+    public interface ICommandHandler<TCommand>
+    {
+        Task HandleAsync(TCommand command);
+    }
+}
+```
+
+Archivo: ProjectFinal.Application/Interfaces/IQueryHandler.cs
+
+```csharp
+namespace ProjectFinal.Application.Interfaces
+{
+    public interface IQueryHandler<TQuery, TResult>
+    {
+        Task<TResult> HandleAsync(TQuery query);
+    }
+}
+```
+
+3.4 CREAR SERVICIO DE APLICACIÓN:
+--------------------------------
+Archivo: ProjectFinal.Application/Interfaces/IClientService.cs
+
+```csharp
+using ProjectFinal.Application.DTOs.Clients;
+using ProjectFinal.Application.DTOs.Common;
+
+namespace ProjectFinal.Application.Interfaces
+{
+    public interface IClientService
+    {
+        Task<ClientDto> CreateAsync(CreateClientDto dto);
+        Task<ClientDto> GetByIdAsync(int id);
+        Task<ClientDto> GetByIdentificationAsync(string identification);
+        Task<PagedResultDto<ClientDto>> GetPagedAsync(int pageNumber, int pageSize, string searchTerm = null);
+        Task UpdateAsync(UpdateClientDto dto);
+        Task DeleteAsync(int id);
+    }
+}
+```
+
+===============================================================================
+
+PASO 4: REFACTORIZAR CAPA DE INFRAESTRUCTURA
+============================================
+
+4.1 CONFIGURAR POSTGRESQL:
+-------------------------
+Archivo: ProjectFinal.Infrastructure/Project.Infrastructure.csproj
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.6" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.6">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProjectFinal.Domain\ProjectFinal.Domain.csproj" />
+    <ProjectReference Include="..\ProjectFinal.Application\ProjectFinal.Application.csproj" />
+  </ItemGroup>
+</Project>
+```
+
+4.2 CONFIGURAR DBCONTEXT PARA POSTGRESQL:
+----------------------------------------
+Archivo: ProjectFinal.Infrastructure/Persistence/ApplicationDbContext.cs
+
+```csharp
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Infrastructure.Identity;
+using ProjectFinal.Infrastructure.Persistence.Configurations;
+
+namespace ProjectFinal.Infrastructure.Persistence
+{
+    public class ApplicationDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, string>
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+
+        public DbSet<Client> Clients { get; set; }
+        public DbSet<Product> Products { get; set; }
+        public DbSet<Invoice> Invoices { get; set; }
+        public DbSet<InvoiceDetail> InvoiceDetails { get; set; }
+        public DbSet<UserPasswordHistory> UserPasswordHistories { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            // Aplicar configuraciones
+            modelBuilder.ApplyConfiguration(new ClientConfiguration());
+            modelBuilder.ApplyConfiguration(new ProductConfiguration());
+            modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
+            modelBuilder.ApplyConfiguration(new InvoiceDetailConfiguration());
+            modelBuilder.ApplyConfiguration(new UserPasswordHistoryConfiguration());
+
+            // Configurar esquemas de PostgreSQL
+            modelBuilder.HasDefaultSchema("public");
+        }
+    }
+}
+```
+
+4.3 CREAR CONFIGURACIONES DE ENTIDADES:
+--------------------------------------
+Archivo: ProjectFinal.Infrastructure/Persistence/Configurations/ClientConfiguration.cs
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Domain.ValueObjects;
+
+namespace ProjectFinal.Infrastructure.Persistence.Configurations
+{
+    public class ClientConfiguration : IEntityTypeConfiguration<Client>
+    {
+        public void Configure(EntityTypeBuilder<Client> builder)
+        {
+            builder.ToTable("clients");
+
+            builder.HasKey(c => c.ClientId);
+            builder.Property(c => c.ClientId)
+                .HasColumnName("client_id")
+                .ValueGeneratedOnAdd();
+
+            // Configuración para Value Object Identification
+            builder.OwnsOne(c => c.Identification, identification =>
+            {
+                identification.Property(i => i.Type)
+                    .HasColumnName("identification_type")
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                identification.Property(i => i.Number)
+                    .HasColumnName("identification_number")
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                identification.HasIndex(i => i.Number)
+                    .IsUnique()
+                    .HasDatabaseName("ix_clients_identification_number");
+            });
+
+            builder.Property(c => c.FirstName)
+                .HasColumnName("first_name")
+                .HasMaxLength(100)
+                .IsRequired();
+
+            builder.Property(c => c.LastName)
+                .HasColumnName("last_name")
+                .HasMaxLength(100)
+                .IsRequired();
+
+            builder.Property(c => c.Phone)
+                .HasColumnName("phone")
+                .HasMaxLength(20);
+
+            builder.Property(c => c.Email)
+                .HasColumnName("email")
+                .HasMaxLength(250);
+
+            builder.Property(c => c.Address)
+                .HasColumnName("address")
+                .HasMaxLength(500);
+
+            builder.Property(c => c.CreatedAt)
+                .HasColumnName("created_at")
+                .IsRequired();
+
+            builder.Property(c => c.UpdatedAt)
+                .HasColumnName("updated_at");
+
+            // Relaciones
+            builder.HasMany(c => c.Invoices)
+                .WithOne(i => i.Client)
+                .HasForeignKey(i => i.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Índices adicionales
+            builder.HasIndex(c => new { c.FirstName, c.LastName })
+                .HasDatabaseName("ix_clients_fullname");
+
+            builder.HasIndex(c => c.Email)
+                .HasDatabaseName("ix_clients_email");
+        }
+    }
+}
+```
+
+4.4 IMPLEMENTAR REPOSITORIO GENÉRICO:
+-----------------------------------
+Archivo: ProjectFinal.Infrastructure/Repositories/Repository.cs
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using ProjectFinal.Domain.Interfaces;
+using ProjectFinal.Infrastructure.Persistence;
+using System.Linq.Expressions;
+
+namespace ProjectFinal.Infrastructure.Repositories
+{
+    public class Repository<T> : IRepository<T> where T : class
+    {
+        protected readonly ApplicationDbContext _context;
+        protected readonly DbSet<T> _dbSet;
+
+        public Repository(ApplicationDbContext context)
+        {
+            _context = context;
+            _dbSet = context.Set<T>();
+        }
+
+        public virtual async Task<T> GetByIdAsync(int id)
+        {
+            return await _dbSet.FindAsync(id);
+        }
+
+        public virtual async Task<IEnumerable<T>> GetAllAsync()
+        {
+            return await _dbSet.AsNoTracking().ToListAsync();
+        }
+
+        public virtual async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
+        {
+            return await _dbSet.Where(predicate).AsNoTracking().ToListAsync();
+        }
+
+        public virtual async Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate)
+        {
+            return await _dbSet.FirstOrDefaultAsync(predicate);
+        }
+
+        public virtual async Task AddAsync(T entity)
+        {
+            await _dbSet.AddAsync(entity);
+        }
+
+        public virtual void Update(T entity)
+        {
+            _dbSet.Update(entity);
+        }
+
+        public virtual void Remove(T entity)
+        {
+            _dbSet.Remove(entity);
+        }
+
+        public virtual async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
+        {
+            return await _dbSet.AnyAsync(predicate);
+        }
+
+        public virtual async Task<int> CountAsync(Expression<Func<T, bool>> predicate = null)
+        {
+            return predicate == null 
+                ? await _dbSet.CountAsync() 
+                : await _dbSet.CountAsync(predicate);
+        }
+    }
+}
+```
+
+4.5 IMPLEMENTAR REPOSITORIO DE CLIENTE:
+--------------------------------------
+Archivo: ProjectFinal.Infrastructure/Repositories/ClientRepository.cs
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Domain.Interfaces;
+using ProjectFinal.Infrastructure.Persistence;
+
+namespace ProjectFinal.Infrastructure.Repositories
+{
+    public class ClientRepository : Repository<Client>, IClientRepository
+    {
+        public ClientRepository(ApplicationDbContext context) : base(context)
+        {
+        }
+
+        public async Task<Client> GetByIdentificationAsync(string identificationNumber)
+        {
+            return await _dbSet.FirstOrDefaultAsync(c => 
+                c.Identification.Number == identificationNumber);
+        }
+
+        public async Task<(IEnumerable<Client> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize, string searchTerm = null)
+        {
+            var query = _dbSet.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                var term = searchTerm.Trim().ToLower();
+                query = query.Where(c =>
+                    c.FirstName.ToLower().Contains(term) ||
+                    c.LastName.ToLower().Contains(term) ||
+                    c.Identification.Number.Contains(term) ||
+                    (c.Email != null && c.Email.ToLower().Contains(term)));
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderBy(c => c.FirstName)
+                .ThenBy(c => c.LastName)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .AsNoTracking()
+                .ToListAsync();
+
+            return (items, totalCount);
+        }
+    }
+}
+```
+
+4.6 IMPLEMENTAR UNIT OF WORK:
+----------------------------
+Archivo: ProjectFinal.Infrastructure/Repositories/UnitOfWork.cs
+
+```csharp
+using Microsoft.EntityFrameworkCore.Storage;
+using ProjectFinal.Domain.Interfaces;
+using ProjectFinal.Infrastructure.Persistence;
+
+namespace ProjectFinal.Infrastructure.Repositories
+{
+    public class UnitOfWork : IUnitOfWork
+    {
+        private readonly ApplicationDbContext _context;
+        private IDbContextTransaction _transaction;
+
+        public UnitOfWork(ApplicationDbContext context)
+        {
+            _context = context;
+        }
+
+        public IClientRepository Clients => 
+            _clientRepository ??= new ClientRepository(_context);
+        private IClientRepository _clientRepository;
+
+        public IProductRepository Products =>
+            _productRepository ??= new ProductRepository(_context);
+        private IProductRepository _productRepository;
+
+        public IInvoiceRepository Invoices =>
+            _invoiceRepository ??= new InvoiceRepository(_context);
+        private IInvoiceRepository _invoiceRepository;
+
+        public async Task<int> SaveChangesAsync()
+        {
+            return await _context.SaveChangesAsync();
+        }
+
+        public async Task BeginTransactionAsync()
+        {
+            _transaction = await _context.Database.BeginTransactionAsync();
+        }
+
+        public async Task CommitTransactionAsync()
+        {
+            if (_transaction != null)
+            {
+                await _transaction.CommitAsync();
+                await _transaction.DisposeAsync();
+                _transaction = null;
+            }
+        }
+
+        public async Task RollbackTransactionAsync()
+        {
+            if (_transaction != null)
+            {
+                await _transaction.RollbackAsync();
+                await _transaction.DisposeAsync();
+                _transaction = null;
+            }
+        }
+
+        public void Dispose()
+        {
+            _transaction?.Dispose();
+            _context?.Dispose();
+        }
+    }
+}
+```
+
+===============================================================================
+
+PASO 5: CREAR CAPA DE PRESENTACIÓN
+=================================
+
+5.1 CREAR PROYECTO PRESENTATION:
+-------------------------------
+Crear nuevo proyecto: ProjectFinal.Presentation
+Copiar todo el contenido de Api/ a ProjectFinal.Presentation/
+
+5.2 REFACTORIZAR PROGRAM.CS:
+---------------------------
+Archivo: ProjectFinal.Presentation/Program.cs
+
+```csharp
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using ProjectFinal.Application.Interfaces;
+using ProjectFinal.Application.UseCases.Clients.Handlers;
+using ProjectFinal.Domain.Interfaces;
+using ProjectFinal.Infrastructure.Identity;
+using ProjectFinal.Infrastructure.Persistence;
+using ProjectFinal.Infrastructure.Repositories;
+using ProjectFinal.Infrastructure.Services;
+using System.Text;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// PostgreSQL Database Context
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("PostgreSQLConnection"),
+        b => b.MigrationsAssembly("ProjectFinal.Infrastructure"))
+);
+
+// Identity configuration
+builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
+{
+    options.Password.RequireDigit = true;
+    options.Password.RequireLowercase = true;
+    options.Password.RequireUppercase = true;
+    options.Password.RequireNonAlphanumeric = true;
+    options.Password.RequiredLength = 8;
+    options.Password.RequiredUniqueChars = 3;
+    options.Lockout.MaxFailedAccessAttempts = 3;
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
+    options.Lockout.AllowedForNewUsers = true;
+})
+.AddEntityFrameworkStores<ApplicationDbContext>()
+.AddDefaultTokenProviders()
+.AddPasswordValidator<CustomPasswordValidator>();
+
+// JWT Configuration
+var jwtSettings = builder.Configuration.GetSection("Jwt");
+var key = Encoding.UTF8.GetBytes(jwtSettings["Key"] ?? 
+    throw new InvalidOperationException("JWT Key not configured"));
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ClockSkew = TimeSpan.Zero
+    };
+});
+
+// Dependency Injection - Clean Architecture
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<IClientRepository, ClientRepository>();
+builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+
+// Application Services
+builder.Services.AddScoped<IClientService, ClientService>();
+builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+
+// Command and Query Handlers
+builder.Services.AddScoped<CreateClientHandler>();
+builder.Services.AddScoped<UpdateClientHandler>();
+builder.Services.AddScoped<DeleteClientHandler>();
+builder.Services.AddScoped<GetClientByIdHandler>();
+builder.Services.AddScoped<GetPagedClientsHandler>();
+
+// Infrastructure Services
+builder.Services.AddScoped<PasswordHistoryService>();
+builder.Services.AddScoped<CustomPasswordValidator>();
+
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+
+// Configure Swagger
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo 
+    { 
+        Title = "ProjectFinal API", 
+        Version = "v1",
+        Description = "Clean Architecture API with PostgreSQL"
+    });
+
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: 'Bearer {token}'",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement()
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                },
+                Scheme = "oauth2",
+                Name = "Bearer",
+                In = ParameterLocation.Header,
+            },
+            new List<string>()
+        }
+    });
+});
+
+// CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+var app = builder.Build();
+
+// Configure pipeline
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "ProjectFinal API V1");
+    });
+}
+
+app.UseHttpsRedirection();
+app.UseCors("AllowAll");
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+```
+
+===============================================================================
+
+PASO 6: CONFIGURACIÓN DE POSTGRESQL
+==================================
+
+6.1 ARCHIVO DE CONFIGURACIÓN:
+-----------------------------
+Archivo: ProjectFinal.Presentation/appsettings.json
+
+```json
+{
+  "ConnectionStrings": {
+    "PostgreSQLConnection": "Host=localhost;Database=ProjectFinalDB;Username=postgres;Password=yourpassword;Port=5432"
+  },
+  "Jwt": {
+    "Key": "F2C7#9z8l8$4b6@e5!r2v7w1q3x6n4u3p0s9d7mZ8kL4nQ1tY6wE9rT2yU5iO0pA3sD6fG9hJ2kL5nM8bV1cX4zQ7w",
+    "Issuer": "ProjectFinalAPI",
+    "Audience": "ProjectFinalUsers",
+    "ExpiryInHours": 24
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Information"
+    }
+  },
+  "AllowedHosts": "*"
+}
+```
+
+6.2 CONFIGURACIÓN DE DESARROLLO:
+-------------------------------
+Archivo: ProjectFinal.Presentation/appsettings.Development.json
+
+```json
+{
+  "ConnectionStrings": {
+    "PostgreSQLConnection": "Host=localhost;Database=ProjectFinalDB_Dev;Username=postgres;Password=yourpassword;Port=5432"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Information",
+      "Microsoft.EntityFrameworkCore.Migrations": "Information"
+    }
+  }
+}
+```
+
+===============================================================================
+
+PASO 7: SCRIPTS DE MIGRACIÓN Y DATOS INICIALES
+=============================================
+
+7.1 CREAR NUEVA MIGRACIÓN:
+--------------------------
+Ejecutar en terminal (desde la carpeta del proyecto):
+
+```powershell
+# Eliminar migraciones existentes
+Remove-Item -Path ".\ProjectFinal.Infrastructure\Migrations\*" -Force
+
+# Crear nueva migración inicial para PostgreSQL
+dotnet ef migrations add InitialPostgreSQL --project ProjectFinal.Infrastructure --startup-project ProjectFinal.Presentation
+
+# Aplicar migración
+dotnet ef database update --project ProjectFinal.Infrastructure --startup-project ProjectFinal.Presentation
+```
+
+7.2 SCRIPT DE DATOS INICIALES:
+-----------------------------
+Archivo: ProjectFinal.Infrastructure/Data/SeedData.cs
+
+```csharp
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Infrastructure.Identity;
+using ProjectFinal.Infrastructure.Persistence;
+
+namespace ProjectFinal.Infrastructure.Data
+{
+    public static class SeedData
+    {
+        public static async Task SeedAsync(ApplicationDbContext context, 
+            UserManager<ApplicationUser> userManager, 
+            RoleManager<ApplicationRole> roleManager)
+        {
+            // Crear roles
+            await CreateRolesAsync(roleManager);
+            
+            // Crear usuarios admin
+            await CreateAdminUserAsync(userManager);
+            
+            // Crear datos de prueba
+            await CreateSampleDataAsync(context);
+        }
+
+        private static async Task CreateRolesAsync(RoleManager<ApplicationRole> roleManager)
+        {
+            var roles = new[] { "Administrator", "User" };
+
+            foreach (var role in roles)
+            {
+                if (!await roleManager.RoleExistsAsync(role))
+                {
+                    await roleManager.CreateAsync(new ApplicationRole { Name = role });
+                }
+            }
+        }
+
+        private static async Task CreateAdminUserAsync(UserManager<ApplicationUser> userManager)
+        {
+            var adminEmail = "admin@projectfinal.com";
+            var adminUser = await userManager.FindByEmailAsync(adminEmail);
+
+            if (adminUser == null)
+            {
+                adminUser = new ApplicationUser
+                {
+                    UserName = adminEmail,
+                    Email = adminEmail,
+                    EmailConfirmed = true
+                };
+
+                var result = await userManager.CreateAsync(adminUser, "Admin123!");
+                
+                if (result.Succeeded)
+                {
+                    await userManager.AddToRoleAsync(adminUser, "Administrator");
+                }
+            }
+        }
+
+        private static async Task CreateSampleDataAsync(ApplicationDbContext context)
+        {
+            if (!await context.Clients.AnyAsync())
+            {
+                var sampleClients = new[]
+                {
+                    new Client("Cedula", "1234567890", "Juan", "Pérez", "0991234567", 
+                              "juan.perez@email.com", "Av. Principal 123"),
+                    new Client("Cedula", "0987654321", "María", "González", "0987654321", 
+                              "maria.gonzalez@email.com", "Calle Secundaria 456"),
+                    new Client("Pasaporte", "ABC123456", "Carlos", "Rodriguez", "0976543210", 
+                              "carlos.rodriguez@email.com", "Av. Los Andes 789")
+                };
+
+                await context.Clients.AddRangeAsync(sampleClients);
+                await context.SaveChangesAsync();
+            }
+        }
+    }
+}
+```
+
+===============================================================================
+
+PASO 8: INSTALACIÓN Y CONFIGURACIÓN DE POSTGRESQL
+=================================================
+
+8.1 INSTALACIÓN EN WINDOWS:
+---------------------------
+
+1. Descargar PostgreSQL desde: https://www.postgresql.org/download/windows/
+2. Ejecutar el instalador
+3. Durante la instalación:
+   - Puerto: 5432 (por defecto)
+   - Usuario: postgres
+   - Contraseña: (la que elijas, recuerda actualizarla en appsettings.json)
+4. Instalar pgAdmin 4 para administración visual
+
+8.2 CONFIGURACIÓN INICIAL:
+-------------------------
+
+```sql
+-- Conectarse a PostgreSQL como usuario postgres
+-- Crear base de datos
+CREATE DATABASE "ProjectFinalDB"
+    WITH 
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    LC_COLLATE = 'Spanish_Ecuador.1252'
+    LC_CTYPE = 'Spanish_Ecuador.1252'
+    TABLESPACE = pg_default
+    CONNECTION LIMIT = -1;
+
+-- Crear usuario específico para la aplicación (opcional pero recomendado)
+CREATE USER projectfinal_user WITH ENCRYPTED PASSWORD 'SecurePassword123!';
+GRANT ALL PRIVILEGES ON DATABASE "ProjectFinalDB" TO projectfinal_user;
+```
+
+8.3 VERIFICAR CONEXIÓN:
+----------------------
+
+```powershell
+# Probar conexión con psql
+psql -h localhost -U postgres -d ProjectFinalDB
+
+# O usar pgAdmin 4 con interfaz gráfica
+```
+
+===============================================================================
+
+PASO 9: TESTING Y VALIDACIÓN
+===========================
+
+9.1 PROYECTO DE PRUEBAS UNITARIAS:
+---------------------------------
+Crear proyecto: ProjectFinal.Tests
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.6" />
+    <PackageReference Include="Moq" Version="4.20.70" />
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProjectFinal.Domain\ProjectFinal.Domain.csproj" />
+    <ProjectReference Include="..\ProjectFinal.Application\ProjectFinal.Application.csproj" />
+    <ProjectReference Include="..\ProjectFinal.Infrastructure\ProjectFinal.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
+```
+
+9.2 EJEMPLO DE PRUEBA UNITARIA:
+------------------------------
+Archivo: ProjectFinal.Tests/Domain/Entities/ClientTests.cs
+
+```csharp
+using FluentAssertions;
+using ProjectFinal.Domain.Entities;
+using ProjectFinal.Domain.Exceptions;
+using Xunit;
+
+namespace ProjectFinal.Tests.Domain.Entities
+{
+    public class ClientTests
+    {
+        [Fact]
+        public void CreateClient_WithValidData_ShouldCreateSuccessfully()
+        {
+            // Arrange
+            var identificationType = "Cedula";
+            var identificationNumber = "1234567890";
+            var firstName = "Juan";
+            var lastName = "Pérez";
+            var phone = "0991234567";
+            var email = "juan@email.com";
+            var address = "Av. Principal 123";
+
+            // Act
+            var client = new Client(identificationType, identificationNumber, 
+                                  firstName, lastName, phone, email, address);
+
+            // Assert
+            client.Should().NotBeNull();
+            client.Identification.Type.Should().Be(identificationType);
+            client.Identification.Number.Should().Be(identificationNumber);
+            client.FirstName.Should().Be(firstName);
+            client.LastName.Should().Be(lastName);
+            client.GetFullName().Should().Be($"{firstName} {lastName}");
+        }
+
+        [Fact]
+        public void CreateClient_WithInvalidCedula_ShouldThrowException()
+        {
+            // Arrange & Act & Assert
+            Action act = () => new Client("Cedula", "1234567899", "Juan", "Pérez", 
+                                        "0991234567", "juan@email.com", "Av. Principal 123");
+
+            act.Should().Throw<ClientDomainException>()
+               .WithMessage("*Invalid identification*");
+        }
+    }
+}
+```
+
+===============================================================================
+
+PASO 10: RESUMEN DE CAMBIOS Y VERIFICACIÓN
+=========================================
+
+10.1 CHECKLIST DE CLEAN ARCHITECTURE:
+------------------------------------
+
+✅ DOMAIN LAYER:
+- Sin dependencias externas
+- Entidades con lógica de negocio
+- Value Objects implementados
+- Interfaces definidas
+- Excepciones de dominio
+
+✅ APPLICATION LAYER:
+- Solo depende de Domain
+- Casos de uso bien definidos
+- DTOs sin dependencias de Infrastructure
+- Servicios de aplicación desacoplados
+
+✅ INFRASTRUCTURE LAYER:
+- Implementa interfaces de Domain y Application
+- Configuración de Entity Framework separada
+- Repositorios con Unit of Work
+- Migración a PostgreSQL
+
+✅ PRESENTATION LAYER:
+- Solo coordina requests/responses
+- Inyección de dependencias correcta
+- Controllers ligeros
+
+10.2 COMANDOS PARA EJECUTAR:
+---------------------------
+
+```powershell
+# 1. Restaurar paquetes
+dotnet restore
+
+# 2. Crear migración inicial
+dotnet ef migrations add InitialPostgreSQL --project ProjectFinal.Infrastructure --startup-project ProjectFinal.Presentation
+
+# 3. Aplicar migración
+dotnet ef database update --project ProjectFinal.Infrastructure --startup-project ProjectFinal.Presentation
+
+# 4. Ejecutar la aplicación
+dotnet run --project ProjectFinal.Presentation
+
+# 5. Ejecutar pruebas
+dotnet test ProjectFinal.Tests
+```
+
+10.3 ESTRUCTURA FINAL DEL PROYECTO:
+----------------------------------
+
+```
+ProjectFinal/
+├── src/
+│   ├── ProjectFinal.Domain/           (Core - 0 dependencies)
+│   │   ├── Entities/
+│   │   ├── ValueObjects/
+│   │   ├── Interfaces/
+│   │   ├── Exceptions/
+│   │   └── Services/
+│   ├── ProjectFinal.Application/      (Use Cases - depends on Domain only)
+│   │   ├── UseCases/
+│   │   ├── DTOs/
+│   │   ├── Interfaces/
+│   │   ├── Mappers/
+│   │   └── Validators/
+│   ├── ProjectFinal.Infrastructure/   (Data Access - depends on Application/Domain)
+│   │   ├── Persistence/
+│   │   ├── Repositories/
+│   │   ├── Services/
+│   │   ├── Identity/
+│   │   └── Migrations/
+│   └── ProjectFinal.Presentation/     (API - depends on Application/Infrastructure)
+│       ├── Controllers/
+│       ├── Middleware/
+│       └── Configuration/
+├── tests/
+│   └── ProjectFinal.Tests/
+└── docs/
+```
+
+===============================================================================
+
+BENEFICIOS OBTENIDOS:
+====================
+
+1. ✅ Arquitectura limpia y mantenible
+2. ✅ Separación correcta de responsabilidades
+3. ✅ Testabilidad mejorada
+4. ✅ Flexibilidad para cambiar infraestructura
+5. ✅ Base de datos PostgreSQL más robusta
+6. ✅ Mejor manejo de transacciones
+7. ✅ Value Objects para validaciones de dominio
+8. ✅ Unit of Work pattern implementado
+9. ✅ Repositorios desacoplados del contexto
+10. ✅ Casos de uso bien definidos
+
+===============================================================================
+
+NOTAS IMPORTANTES:
+==================
+
+- Todos los archivos deben crearse en el orden especificado
+- Las dependencias entre capas deben respetarse estrictamente
+- PostgreSQL debe estar instalado y configurado antes de ejecutar migraciones
+- Las cadenas de conexión deben actualizarse según tu configuración local
+- Los tests unitarios son fundamentales para validar la lógica de dominio
+- El patrón Repository + Unit of Work mejora significativamente el manejo de datos
+
+===============================================================================

@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Project.Application.Dtos;
+using Project.Infrastructure.Frameworks.Identity;
 
 namespace Api.Controllers
 {
@@ -9,16 +10,16 @@ namespace Api.Controllers
     [Route("api/[controller]")]
     public class RolesController : ControllerBase
     {
-        private readonly RoleManager<IdentityRole> _roleManager;
+        private readonly RoleManager<ApplicationRole> _roleManager;
 
-        public RolesController(RoleManager<IdentityRole> roleManager)
+        public RolesController(RoleManager<ApplicationRole> roleManager)
         {
             _roleManager = roleManager;
         }
 
         // Admin: List all roles
         [HttpGet]
-        [Authorize(Roles = "Administrator")]
+      //  [Authorize(Roles = "Administrator")]
         public ActionResult<IEnumerable<RolDto>> GetRoles()
         {
             var roles = _roleManager.Roles.Select(r => new RolDto
@@ -49,10 +50,16 @@ namespace Api.Controllers
 
         // Admin: Create role
         [HttpPost]
-        [Authorize(Roles = "Administrator")]
+        //[Authorize(Roles = "Administrator")]
         public async Task<ActionResult> CreateRole([FromBody] RoleCreateDto dto)
         {
-            var role = new IdentityRole(dto.Name);
+            var role = new ApplicationRole
+            {
+                Name = dto.Name,
+                // Puedes inicializar otras propiedades si es necesario, por ejemplo:
+                Description = dto.Description,
+                IsActive = true
+            };
             var result = await _roleManager.CreateAsync(role);
 
             if (!result.Succeeded)

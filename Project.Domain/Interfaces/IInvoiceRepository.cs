@@ -7,20 +7,17 @@ using System.Threading.Tasks;
 
 namespace Project.Domain.Interfaces
 {
-    public interface IInvoiceRepository
+    public interface IInvoiceRepository : IRepository<Invoice>
     {
-        Task<Invoice> GetByIdAsync(int id);
-        Task<IEnumerable<Invoice>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
-        Task AddAsync(Invoice invoice);
-        Task UpdateAsync(Invoice invoice);
-        Task DeleteAsync(int id);
-        Task<int> CountAsync(string searchTerm = null);
-
-        // Métodos para detalle de factura (detalle)
+        Task<(IEnumerable<Invoice> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize, string searchTerm = null);
+        Task<Invoice> GetByInvoiceNumberAsync(string invoiceNumber);
+        Task<IEnumerable<Invoice>> GetByClientIdAsync(int clientId);
+        Task<IEnumerable<Invoice>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
+        
+        // Métodos para detalle de factura
         Task<IEnumerable<InvoiceDetail>> GetInvoiceDetailsAsync(int invoiceId);
         Task<InvoiceDetail> GetInvoiceDetailAsync(int invoiceId, int productId);
-
-        // Lógica de ventas (maestro-detalle)
         Task AddProductToInvoiceAsync(int invoiceId, int productId, int quantity);
         Task RemoveProductFromInvoiceAsync(int invoiceId, int productId);
         Task<bool> ProductExistsInInvoiceAsync(int invoiceId, int productId);

@@ -12,7 +12,7 @@ namespace Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(AuthenticationSchemes = "Bearer")] // Ensure JWT Bearer is used
+    //[Authorize(AuthenticationSchemes = "Bearer")] // Ensure JWT Bearer is used
     public class UsersController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
@@ -70,7 +70,7 @@ namespace Api.Controllers
 
         // Admin: Create user (with role)
         [HttpPost]
-        [Authorize(Roles = "Administrator")]
+       // [Authorize(Roles = "Administrator")]
         public async Task<ActionResult> CreateUser([FromBody] UserCreateDto dto)
         {
             var user = new ApplicationUser

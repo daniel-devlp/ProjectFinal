@@ -1,30 +1,22 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Project.Application.Dtos;
+﻿using Project.Application.Dtos;
 using Project.Domain.Entities;
 using Project.Domain.Interfaces;
-using Project.Infrastructure.Frameworks.EntityFramework;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Project.Application.Services
 {
     public class ClientServices : IClientServices
     {
-        private readonly IClientRepository _clientRepository;
-        private readonly ApplicationDBContext _context;
-        public ClientServices(IClientRepository clientRepository, ApplicationDBContext context)
+        private readonly IUnitOfWork _unitOfWork;
+
+        public ClientServices(IUnitOfWork unitOfWork)
         {
-            _context = context ?? throw new ArgumentNullException(nameof(context));
-            _clientRepository = clientRepository ?? throw new ArgumentNullException(nameof(clientRepository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
         public async Task<ClientDto> GetByIdAsync(int id)
         {
             if (id <= 0) throw new ArgumentException("Id must be greater than zero.", nameof(id));
-            var client = await _clientRepository.GetByIdAsync(id);
+            var client = await _unitOfWork.Clients.GetByIdAsync(id);
             return client != null ? MapToDto(client) : null;
         }
 
@@ -33,7 +25,7 @@ namespace Project.Application.Services
             if (string.IsNullOrWhiteSpace(identification))
                 throw new ArgumentException("Identification is required.", nameof(identification));
 
-            var client = await _clientRepository.GetByIdentificationAsync(identification);
+            var client = await _unitOfWork.Clients.GetByIdentificationAsync(identification);
             return client != null ? MapToDto(client) : null;
         }
 
@@ -42,41 +34,9 @@ namespace Project.Application.Services
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
-            var query = _context.Clients.AsQueryable();
+            var (clients, totalCount) = await _unitOfWork.Clients.GetPagedAsync(pageNumber, pageSize, searchTerm);
 
-            if (!string.IsNullOrWhiteSpace(searchTerm))
-            {
-                string term = searchTerm.Trim().ToLower();
-                query = query.Where(c =>
-                    (c.FirstName != null && c.FirstName.ToLower().Contains(term)) ||
-                    (c.LastName != null && c.LastName.ToLower().Contains(term)) ||
-                    (c.IdentificationNumber != null && c.IdentificationNumber.ToLower().Contains(term)) ||
-                    (c.Email != null && c.Email.ToLower().Contains(term)) ||
-                    (c.Phone != null && c.Phone.ToLower().Contains(term)) ||
-                    (c.Address != null && c.Address.ToLower().Contains(term))
-                );
-            }
-
-            var totalCount = await query.CountAsync();
-
-            var clients = await query
-                .OrderBy(c => c.ClientId)
-                .ThenBy(c => c.LastName)
-                .Skip((pageNumber - 1) * pageSize)
-                .Take(pageSize)
-                .AsNoTracking()
-                .ToListAsync();
-
-            var clientDtos = clients.Select(c => new ClientDto
-            {
-                ClientId = c.ClientId,
-                IdentificationNumber = c.IdentificationNumber,
-                FirstName = c.FirstName,
-                LastName = c.LastName,
-                Phone = c.Phone,
-                Email = c.Email,
-                Address = c.Address
-            }).ToList();
+            var clientDtos = clients.Select(MapToDto).ToList();
 
             return new PagedResult<ClientDto>
             {
@@ -91,103 +51,100 @@ namespace Project.Application.Services
         {
             if (clientDto == null) throw new ArgumentNullException(nameof(clientDto));
 
-          
-            if (!VerificaCedula(clientDto.IdentificationNumber))
-                throw new InvalidOperationException("El número de cédula no es válido.");
-
-            // Validación de unicidad
-            if (await _clientRepository.ExistsAsync(clientDto.IdentificationNumber))
+            // Validación de unicidad usando el nuevo método
+            if (await _unitOfWork.Clients.ExistsAsync(c => c.IdentificationNumber == clientDto.IdentificationNumber))
                 throw new InvalidOperationException("A client with this identification already exists.");
 
-            var client = new Client
+            try
             {
-                IdentificationType = clientDto.IdentificationType,
-                IdentificationNumber = clientDto.IdentificationNumber,
-                FirstName = clientDto.FirstName?.Trim(),
-                LastName = clientDto.LastName?.Trim(),
-                Phone = clientDto.Phone?.Trim(),
-                Email = clientDto.Email?.Trim(),
-                Address = clientDto.Address?.Trim()
-            };
+                // Usar el constructor de dominio que incluye validaciones
+                var client = new Client(
+                    clientDto.IdentificationType,
+                    clientDto.IdentificationNumber,
+                    clientDto.FirstName,
+                    clientDto.LastName,
+                    clientDto.Phone,
+                    clientDto.Email,
+                    clientDto.Address
+                );
 
-            await _clientRepository.AddAsync(client);
-        }
-
-        private bool VerificaCedula(string identificationNumber)
-        {
-            int isNumeric;
-            var total = 0;
-            const int tamanoLongitudCedula = 10;
-            int[] coeficientes = { 2, 1, 2, 1, 2, 1, 2, 1, 2 };
-            const int numeroProvincias = 24;
-            const int tercerDigito = 6;
-
-            if (int.TryParse(identificationNumber, out isNumeric) && identificationNumber.Length == tamanoLongitudCedula)
-            {
-                var provincia = Convert.ToInt32(string.Concat(identificationNumber[0], identificationNumber[1], string.Empty));
-                var digitoTres = Convert.ToInt32(identificationNumber[2] + string.Empty);
-                if ((provincia > 0 && provincia <= numeroProvincias) && digitoTres < tercerDigito)
-                {
-                    var digitoVerificadorRecibido = Convert.ToInt32(identificationNumber[9] + string.Empty);
-                    for (var k = 0; k < coeficientes.Length; k++)
-                    {
-                        var valor = Convert.ToInt32(coeficientes[k] + string.Empty) * Convert.ToInt32(identificationNumber[k] + string.Empty);
-                        total = valor >= 10 ? total + (valor - 9) : total + valor;
-                    }
-                    var digitoVerificadorObtenido = total >= 10 ? (total % 10) != 0 ? 10 - (total % 10) : (total % 10) : total;
-                    return digitoVerificadorObtenido == digitoVerificadorRecibido;
-                }
+                await _unitOfWork.Clients.AddAsync(client);
+                await _unitOfWork.SaveChangesAsync();
             }
-            return false;
+            catch (Exception ex)
+            {
+                // Re-throw domain exceptions o convertir a application exceptions
+                throw new InvalidOperationException($"Error creating client: {ex.Message}", ex);
+            }
         }
 
         public async Task UpdateAsync(ClientUpdateDto clientDto)
         {
             if (clientDto == null) throw new ArgumentNullException(nameof(clientDto));
 
-            var existingClient = await _clientRepository.GetByIdAsync(clientDto.ClientId);
+            var existingClient = await _unitOfWork.Clients.GetByIdAsync(clientDto.ClientId);
             if (existingClient == null)
                 throw new InvalidOperationException("Client does not exist.");
 
-            // (Opcional) Validar unicidad si cambia la identificación
+            // Validar unicidad si cambia la identificación
             if (!string.Equals(existingClient.IdentificationNumber, clientDto.IdentificationNumber, StringComparison.OrdinalIgnoreCase))
             {
-                if (await _clientRepository.ExistsAsync(clientDto.IdentificationNumber))
+                if (await _unitOfWork.Clients.ExistsAsync(c => c.IdentificationNumber == clientDto.IdentificationNumber))
                     throw new InvalidOperationException("A client with this identification already exists.");
             }
 
-            existingClient.IdentificationType = clientDto.IdentificationType;
-            existingClient.IdentificationNumber = clientDto.IdentificationNumber;
-            existingClient.FirstName = clientDto.FirstName?.Trim();
-            existingClient.LastName = clientDto.LastName?.Trim();
-            existingClient.Phone = clientDto.Phone?.Trim();
-            existingClient.Email = clientDto.Email?.Trim();
-            existingClient.Address = clientDto.Address?.Trim();
+            try
+            {
+                // Usar métodos de dominio para actualizar
+                existingClient.UpdatePersonalInfo(
+                    clientDto.FirstName,
+                    clientDto.LastName,
+                    clientDto.Phone,
+                    clientDto.Email,
+                    clientDto.Address
+                );
 
-            await _clientRepository.UpdateAsync(existingClient);
+                if (!string.Equals(existingClient.IdentificationNumber, clientDto.IdentificationNumber, StringComparison.OrdinalIgnoreCase))
+                {
+                    existingClient.UpdateIdentification(clientDto.IdentificationType, clientDto.IdentificationNumber);
+                }
+
+                _unitOfWork.Clients.Update(existingClient);
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Error updating client: {ex.Message}", ex);
+            }
         }
 
         public async Task DeleteAsync(int id)
         {
             if (id <= 0) throw new ArgumentException("Id must be greater than zero.", nameof(id));
 
-            var client = await _clientRepository.GetByIdAsync(id);
+            var client = await _unitOfWork.Clients.GetByIdAsync(id);
             if (client == null)
                 throw new InvalidOperationException("Client does not exist.");
 
-            await _clientRepository.DeleteAsync(id);
+            _unitOfWork.Clients.Remove(client);
+            await _unitOfWork.SaveChangesAsync();
         }
 
         public Task<bool> ExistsAsync(string identification)
         {
             if (string.IsNullOrWhiteSpace(identification))
                 throw new ArgumentException("Identification is required.", nameof(identification));
-            return _clientRepository.ExistsAsync(identification);
+            return _unitOfWork.Clients.ExistsAsync(c => c.IdentificationNumber == identification);
         }
 
         public Task<int> CountAsync(string searchTerm = null)
         {
-            return _clientRepository.CountAsync(searchTerm?.Trim());
+            return string.IsNullOrWhiteSpace(searchTerm) 
+                ? _unitOfWork.Clients.CountAsync() 
+                : _unitOfWork.Clients.CountAsync(c => 
+                    c.FirstName.Contains(searchTerm) || 
+                    c.LastName.Contains(searchTerm) || 
+                    c.IdentificationNumber.Contains(searchTerm));
         }
 
         private ClientDto MapToDto(Client client)
@@ -197,6 +154,7 @@ namespace Project.Application.Services
             {
                 ClientId = client.ClientId,
                 IdentificationNumber = client.IdentificationNumber,
+              //  IdentificationType = client.IdentificationType,
                 FirstName = client.FirstName,
                 LastName = client.LastName,
                 Phone = client.Phone,

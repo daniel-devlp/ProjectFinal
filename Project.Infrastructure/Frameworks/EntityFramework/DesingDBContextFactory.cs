@@ -15,7 +15,7 @@ namespace Project.Infrastructure.Frameworks.EntityFramework
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContext>();
 
             // Aquí va tu cadena de conexión
-            var connectionString = "Data Source=Daniel\\PUNTO_A;Initial Catalog=InvoiceDB;Integrated Security=True;Encrypt=False;Trust Server Certificate=True";
+            var connectionString = "Data Source=DANNY\\MULTIDIMENSIONAL;Initial Catalog=InvoiceDB;Integrated Security=True;Encrypt=False;Trust Server Certificate=True";
             optionsBuilder.UseSqlServer(connectionString);
 
             return new ApplicationDBContext(optionsBuilder.Options);

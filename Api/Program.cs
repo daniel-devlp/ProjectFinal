@@ -104,12 +104,10 @@ namespace Api
             // Image Service - Cloudinary
             builder.Services.AddScoped<IImageService, ImageService>();
 
-            // Servicios para módulo de pagos (comentados para implementación futura)
-            /*
+            // Servicios para módulo de pagos - ACTIVADO
             builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
             builder.Services.AddScoped<IPaymentMethodRepository, PaymentMethodRepository>();
             builder.Services.AddScoped<IPaymentService, PaymentService>();
-            */
 
             // Infrastructure Services
             builder.Services.AddScoped<PasswordHistoryService>();
@@ -123,9 +121,9 @@ namespace Api
             {
                 c.SwaggerDoc("v1", new OpenApiInfo 
                 { 
-                    Title = "ProjectFinal API with Cloudinary", 
+                    Title = "ProjectFinal API - E-commerce Complete", 
                     Version = "v1",
-                    Description = "Clean Architecture API with Shopping Cart, Payment System & Image Upload (SQL Server + PostgreSQL ready)"
+                    Description = "Clean Architecture API with Shopping Cart, Payment System & Image Upload - Ready for Mobile"
                 });
 
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme

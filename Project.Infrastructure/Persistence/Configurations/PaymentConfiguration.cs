@@ -1,7 +1,3 @@
-// CONFIGURACIONES EF PARA MÓDULO DE PAGOS - PREPARADO PARA IMPLEMENTACIÓN FUTURA
-// Descomentar cuando sea necesario implementar sistema de pagos
-
-/*
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Project.Domain.Entities;
@@ -10,35 +6,35 @@ namespace Project.Infrastructure.Persistence.Configurations
 {
     public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
     {
-    public void Configure(EntityTypeBuilder<Payment> builder)
+        public void Configure(EntityTypeBuilder<Payment> builder)
       {
-          builder.ToTable("Payments");
+  builder.ToTable("Payments");
 
 builder.HasKey(p => p.PaymentId);
       builder.Property(p => p.PaymentId)
     .ValueGeneratedOnAdd();
 
-            builder.Property(p => p.InvoiceId)
+      builder.Property(p => p.InvoiceId)
     .IsRequired();
 
-     builder.Property(p => p.PaymentMethodId)
+    builder.Property(p => p.PaymentMethodId)
    .HasMaxLength(50)
-            .IsRequired();
+       .IsRequired();
 
-            builder.Property(p => p.Amount)
+   builder.Property(p => p.Amount)
    .HasColumnType("decimal(18,2)")
    .IsRequired();
 
         builder.Property(p => p.TransactionId)
-          .HasMaxLength(100)
+      .HasMaxLength(100)
          .IsRequired();
 
-        builder.Property(p => p.Status)
+      builder.Property(p => p.Status)
      .HasConversion<int>()
        .IsRequired();
 
-            builder.Property(p => p.PaymentDate)
-            .IsRequired();
+ builder.Property(p => p.PaymentDate)
+         .IsRequired();
 
  builder.Property(p => p.ProcessedAt);
 
@@ -46,35 +42,35 @@ builder.HasKey(p => p.PaymentId);
 .HasMaxLength(1000);
 
   builder.Property(p => p.FailureReason)
-             .HasMaxLength(500);
+         .HasMaxLength(500);
 
     // Relaciones
-            builder.HasOne(p => p.Invoice)
-                .WithMany()
+     builder.HasOne(p => p.Invoice)
+      .WithMany()
     .HasForeignKey(p => p.InvoiceId)
       .OnDelete(DeleteBehavior.Restrict);
 
 builder.HasOne(p => p.PaymentMethod)
     .WithMany(pm => pm.Payments)
                 .HasForeignKey(p => p.PaymentMethodId)
-             .OnDelete(DeleteBehavior.Restrict);
+     .OnDelete(DeleteBehavior.Restrict);
 
-            // Índices
+  // Índices
   builder.HasIndex(p => p.InvoiceId)
      .HasDatabaseName("IX_Payments_InvoiceId");
 
      builder.HasIndex(p => p.TransactionId)
-         .IsUnique()
+      .IsUnique()
            .HasDatabaseName("IX_Payments_TransactionId");
 
-            builder.HasIndex(p => p.Status)
-        .HasDatabaseName("IX_Payments_Status");
+      builder.HasIndex(p => p.Status)
+ .HasDatabaseName("IX_Payments_Status");
 
   builder.HasIndex(p => p.PaymentDate)
      .HasDatabaseName("IX_Payments_PaymentDate");
 
-       // Configuración futura para PostgreSQL (comentada)
-       /*
+        // Configuración futura para PostgreSQL (comentada)
+        /*
        builder.ToTable("payments");
       builder.Property(p => p.PaymentId).HasColumnName("payment_id");
    builder.Property(p => p.InvoiceId).HasColumnName("invoice_id");
@@ -84,85 +80,126 @@ builder.HasOne(p => p.PaymentMethod)
         builder.Property(p => p.Status).HasColumnName("status");
   builder.Property(p => p.PaymentDate).HasColumnName("payment_date");
       builder.Property(p => p.ProcessedAt).HasColumnName("processed_at");
-            builder.Property(p => p.ProcessorResponse).HasColumnName("processor_response");
+  builder.Property(p => p.ProcessorResponse).HasColumnName("processor_response");
          builder.Property(p => p.FailureReason).HasColumnName("failure_reason");
-*//*
+*/
         }
     }
 
     public class PaymentMethodConfiguration : IEntityTypeConfiguration<PaymentMethod>
     {
-        public void Configure(EntityTypeBuilder<PaymentMethod> builder)
+     public void Configure(EntityTypeBuilder<PaymentMethod> builder)
         {
     builder.ToTable("PaymentMethods");
 
             builder.HasKey(pm => pm.PaymentMethodId);
-            
+        
       builder.Property(pm => pm.PaymentMethodId)
        .HasMaxLength(50)
            .IsRequired();
 
             builder.Property(pm => pm.Name)
           .HasMaxLength(100)
-          .IsRequired();
+   .IsRequired();
 
-            builder.Property(pm => pm.Description)
-                .HasMaxLength(500);
+      builder.Property(pm => pm.Description)
+.HasMaxLength(500);
 
-            builder.Property(pm => pm.IsActive)
+         builder.Property(pm => pm.IsActive)
      .IsRequired();
 
             builder.Property(pm => pm.Type)
-                .HasConversion<int>()
+           .HasConversion<int>()
  .IsRequired();
 
             builder.Property(pm => pm.ProcessorConfig)
-              .HasMaxLength(2000);
+       .HasMaxLength(2000);
 
     builder.Property(pm => pm.MinAmount)
        .HasColumnType("decimal(18,2)");
 
      builder.Property(pm => pm.MaxAmount)
-                .HasColumnType("decimal(18,2)");
+  .HasColumnType("decimal(18,2)");
 
-            builder.Property(pm => pm.ProcessingFee)
+     builder.Property(pm => pm.ProcessingFee)
          .HasColumnType("decimal(18,2)");
+
+        builder.Property(pm => pm.IconUrl)
+     .HasMaxLength(500);
+
+       builder.Property(pm => pm.DisplayOrder)
+  .IsRequired();
 
       // Relaciones
      builder.HasMany(pm => pm.Payments)
-                .WithOne(p => p.PaymentMethod)
+             .WithOne(p => p.PaymentMethod)
           .HasForeignKey(p => p.PaymentMethodId)
-                .OnDelete(DeleteBehavior.Restrict);
+     .OnDelete(DeleteBehavior.Restrict);
 
             // Índices
-         builder.HasIndex(pm => pm.IsActive)
+   builder.HasIndex(pm => pm.IsActive)
     .HasDatabaseName("IX_PaymentMethods_IsActive");
 
-            builder.HasIndex(pm => pm.Type)
+   builder.HasIndex(pm => pm.Type)
       .HasDatabaseName("IX_PaymentMethods_Type");
 
-     // Datos semilla
+ builder.HasIndex(pm => pm.DisplayOrder)
+  .HasDatabaseName("IX_PaymentMethods_DisplayOrder");
+
+     // Datos semilla - Métodos de pago ideales para móvil
      builder.HasData(
-new PaymentMethod("CASH", "Efectivo", PaymentType.Cash) { Description = "Pago en efectivo", ProcessingFee = 0 },
- new PaymentMethod("CREDIT_CARD", "Tarjeta de Crédito", PaymentType.CreditCard) { Description = "Pago con tarjeta de crédito", ProcessingFee = 0.03m },
-     new PaymentMethod("DEBIT_CARD", "Tarjeta de Débito", PaymentType.DebitCard) { Description = "Pago con tarjeta de débito", ProcessingFee = 0.02m },
-        new PaymentMethod("BANK_TRANSFER", "Transferencia Bancaria", PaymentType.BankTransfer) { Description = "Transferencia bancaria", ProcessingFee = 0.01m }
-            );
+        new PaymentMethod("CASH", "Efectivo", PaymentType.Cash) 
+  { 
+     Description = "Pago en efectivo al recibir", 
+         ProcessingFee = 0, 
+         DisplayOrder = 1,
+    IconUrl = "https://res.cloudinary.com/dvdzabq8x/image/upload/v1699000000/payment-icons/cash.png"
+   },
+   new PaymentMethod("CREDIT_CARD", "Tarjeta de Crédito", PaymentType.CreditCard) 
+      { 
+     Description = "Pago con tarjeta de crédito", 
+   ProcessingFee = 0.03m, 
+      DisplayOrder = 2,
+      IconUrl = "https://res.cloudinary.com/dvdzabq8x/image/upload/v1699000000/payment-icons/credit-card.png"
+      },
+     new PaymentMethod("DEBIT_CARD", "Tarjeta de Débito", PaymentType.DebitCard) 
+     { 
+            Description = "Pago con tarjeta de débito", 
+       ProcessingFee = 0.02m, 
+        DisplayOrder = 3,
+ IconUrl = "https://res.cloudinary.com/dvdzabq8x/image/upload/v1699000000/payment-icons/debit-card.png"
+      },
+       new PaymentMethod("BANK_TRANSFER", "Transferencia Bancaria", PaymentType.BankTransfer) 
+            { 
+ Description = "Transferencia bancaria", 
+           ProcessingFee = 0.01m, 
+         DisplayOrder = 4,
+       IconUrl = "https://res.cloudinary.com/dvdzabq8x/image/upload/v1699000000/payment-icons/bank-transfer.png"
+      },
+       new PaymentMethod("MOBILE_MONEY", "Dinero Móvil", PaymentType.MobileMoney) 
+       { 
+   Description = "Pago con dinero móvil", 
+       ProcessingFee = 0.02m, 
+        DisplayOrder = 5,
+       IconUrl = "https://res.cloudinary.com/dvdzabq8x/image/upload/v1699000000/payment-icons/mobile-money.png"
+     }
+       );
 
   // Configuración futura para PostgreSQL (comentada)
-       /*
+   /*
  builder.ToTable("payment_methods");
       builder.Property(pm => pm.PaymentMethodId).HasColumnName("payment_method_id");
           builder.Property(pm => pm.Name).HasColumnName("name");
-            builder.Property(pm => pm.Description).HasColumnName("description");
-            builder.Property(pm => pm.IsActive).HasColumnName("is_active");
+         builder.Property(pm => pm.Description).HasColumnName("description");
+         builder.Property(pm => pm.IsActive).HasColumnName("is_active");
      builder.Property(pm => pm.Type).HasColumnName("type");
        builder.Property(pm => pm.ProcessorConfig).HasColumnName("processor_config");
             builder.Property(pm => pm.MinAmount).HasColumnName("min_amount");
        builder.Property(pm => pm.MaxAmount).HasColumnName("max_amount");
      builder.Property(pm => pm.ProcessingFee).HasColumnName("processing_fee");
-            *//*
+ builder.Property(pm => pm.IconUrl).HasColumnName("icon_url");
+        builder.Property(pm => pm.DisplayOrder).HasColumnName("display_order");
+        */
         }
     }
 }
-*/

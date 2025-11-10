@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Http;
+
 namespace Project.Application.Dtos
 {
   public class ImageUploadResultDto

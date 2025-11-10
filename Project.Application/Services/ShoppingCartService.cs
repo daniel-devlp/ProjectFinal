@@ -171,7 +171,7 @@ public async Task<decimal> GetCartTotalAsync(string userId)
    ClientId = clientId,
    UserId = userId,
      IssueDate = DateTime.UtcNow,
-   Observations = "Generated from shopping cart",
+   Observations = "Generated from shopping cart - Ready for payment",
     InvoiceDetails = cartItems.Select(item => new InvoiceDetail
    {
       ProductID = item.ProductId,
@@ -229,6 +229,33 @@ IssueDate = invoice.IssueDate,
   throw;
        }
    }
+
+   // Nuevo método para checkout con pago inmediato
+        public async Task<CheckoutWithPaymentResultDto> CheckoutWithPaymentAsync(string userId, int clientId, string paymentMethodId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+        throw new ArgumentException("User ID is required", nameof(userId));
+
+     if (clientId <= 0)
+     throw new ArgumentException("Client ID must be greater than zero", nameof(clientId));
+
+  if (string.IsNullOrWhiteSpace(paymentMethodId))
+                throw new ArgumentException("Payment method ID is required", nameof(paymentMethodId));
+
+   // Primero crear la factura
+  var invoice = await CheckoutAsync(userId, clientId);
+
+  // Luego intentar procesar el pago (esto requeriría inyectar IPaymentService)
+            // Por ahora retornamos la información para que el móvil procese el pago
+  return new CheckoutWithPaymentResultDto
+  {
+        Invoice = invoice,
+    PaymentRequired = true,
+    PaymentMethodId = paymentMethodId,
+ Amount = invoice.Total,
+   Message = "Invoice created successfully. Proceed to payment."
+            };
+    }
 
    private static ShoppingCartDto MapToDto(ShoppingCart cartItem, Product? product)
         {

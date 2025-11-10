@@ -30,16 +30,14 @@ namespace Project.Infrastructure.Repositories
             _shoppingCartRepository ??= new ShoppingCartRepository(_context);
         private IShoppingCartRepository _shoppingCartRepository;
 
-        // Repositorios para módulo de pagos (comentados para implementación futura)
-        /*
+        // Repositorios para módulo de pagos - ACTIVADO
         public IPaymentRepository Payments =>
-         _paymentRepository ??= new PaymentRepository(_context);
+            _paymentRepository ??= new PaymentRepository(_context);
         private IPaymentRepository _paymentRepository;
 
         public IPaymentMethodRepository PaymentMethods =>
             _paymentMethodRepository ??= new PaymentMethodRepository(_context);
         private IPaymentMethodRepository _paymentMethodRepository;
-  */
 
         public async Task<int> SaveChangesAsync()
         {

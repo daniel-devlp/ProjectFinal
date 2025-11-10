@@ -28,11 +28,9 @@ namespace Project.Infrastructure.Frameworks.EntityFramework
         // DbSet para el historial de contraseñas
         public DbSet<UserPasswordHistory> UserPasswordHistories { get; set; }
 
-        // DbSets para módulo de pagos (comentados para implementación futura)
-        /*
+        // DbSets para módulo de pagos - ACTIVADO
         public DbSet<Payment> Payments { get; set; }
         public DbSet<PaymentMethod> PaymentMethods { get; set; }
-        */
         
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -44,12 +42,10 @@ namespace Project.Infrastructure.Frameworks.EntityFramework
             modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
             modelBuilder.ApplyConfiguration(new InvoiceDetailConfiguration());
             modelBuilder.ApplyConfiguration(new ShoppingCartConfiguration());
-        
-            // Configuraciones para módulo de pagos (comentadas)
-            /*
+            
+            // Configuraciones para módulo de pagos - ACTIVADO
             modelBuilder.ApplyConfiguration(new PaymentConfiguration());
             modelBuilder.ApplyConfiguration(new PaymentMethodConfiguration());
-            */
             
             // Configurar la relación entre ApplicationUser y UserPasswordHistory
             modelBuilder.Entity<UserPasswordHistory>()

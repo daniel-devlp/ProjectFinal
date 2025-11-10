@@ -7,11 +7,9 @@ namespace Project.Domain.Interfaces
         IInvoiceRepository Invoices { get; }
         IShoppingCartRepository ShoppingCart { get; }
         
-        // Interfaces para módulo de pagos (comentadas para implementación futura)
-        /*
+        // Interfaces para módulo de pagos - ACTIVADO
         IPaymentRepository Payments { get; }
         IPaymentMethodRepository PaymentMethods { get; }
-        */
       
         Task<int> SaveChangesAsync();
         Task BeginTransactionAsync();

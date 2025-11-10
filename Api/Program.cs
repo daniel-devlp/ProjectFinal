@@ -79,17 +79,24 @@ namespace Api
             builder.Services.AddScoped<IClientRepository, ClientRepository>();
             builder.Services.AddScoped<IProductRepository, ProductRepository>();
             builder.Services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+            builder.Services.AddScoped<IShoppingCartRepository, ShoppingCartRepository>();
 
             // Application Services
             builder.Services.AddScoped<IClientServices, ClientServices>();
             builder.Services.AddScoped<IProductServices, ProductService>();
             builder.Services.AddScoped<IInvoiceServices, InvoiceService>();
+            builder.Services.AddScoped<IShoppingCartService, ShoppingCartService>();
+
+            // Servicios para módulo de pagos (comentados para implementación futura)
+            /*
+            builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
+            builder.Services.AddScoped<IPaymentMethodRepository, PaymentMethodRepository>();
+            builder.Services.AddScoped<IPaymentService, PaymentService>();
+            */
 
             // Infrastructure Services
             builder.Services.AddScoped<PasswordHistoryService>();
             builder.Services.AddScoped<CustomPasswordValidator>();
-            //
-        
 
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
@@ -101,7 +108,7 @@ namespace Api
                 { 
                     Title = "ProjectFinal API", 
                     Version = "v1",
-                    Description = "Clean Architecture API with SQL Server (PostgreSQL ready)"
+                    Description = "Clean Architecture API with Shopping Cart & Payment System (SQL Server + PostgreSQL ready)"
                 });
 
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme

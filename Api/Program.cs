@@ -4,11 +4,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Project.Application.Services;
+using Project.Application.Settings;
 using Project.Domain.Interfaces;
 using Project.Infrastructure.Frameworks.EntityFramework;
 using Project.Infrastructure.Frameworks.Identity;
 using Project.Infrastructure.Repositories;
+using Project.Infrastructure.Services;
 using System.Text;
+using CloudinaryDotNet;
 
 namespace Api
 {
@@ -74,6 +77,17 @@ namespace Api
                 };
             });
             
+            // Cloudinary Configuration
+            builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("CloudinarySettings"));
+            builder.Services.AddSingleton(sp =>
+            {
+                var settings = builder.Configuration.GetSection("CloudinarySettings").Get<CloudinarySettings>();
+                if (settings == null)
+                    throw new InvalidOperationException("CloudinarySettings not found in configuration");
+   
+                return new Cloudinary(new Account(settings.CloudName, settings.ApiKey, settings.ApiSecret));
+            });
+     
             // Dependency Injection - Clean Architecture
             builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
             builder.Services.AddScoped<IClientRepository, ClientRepository>();
@@ -86,6 +100,9 @@ namespace Api
             builder.Services.AddScoped<IProductServices, ProductService>();
             builder.Services.AddScoped<IInvoiceServices, InvoiceService>();
             builder.Services.AddScoped<IShoppingCartService, ShoppingCartService>();
+
+            // Image Service - Cloudinary
+            builder.Services.AddScoped<IImageService, ImageService>();
 
             // Servicios para módulo de pagos (comentados para implementación futura)
             /*
@@ -106,9 +123,9 @@ namespace Api
             {
                 c.SwaggerDoc("v1", new OpenApiInfo 
                 { 
-                    Title = "ProjectFinal API", 
+                    Title = "ProjectFinal API with Cloudinary", 
                     Version = "v1",
-                    Description = "Clean Architecture API with Shopping Cart & Payment System (SQL Server + PostgreSQL ready)"
+                    Description = "Clean Architecture API with Shopping Cart, Payment System & Image Upload (SQL Server + PostgreSQL ready)"
                 });
 
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme

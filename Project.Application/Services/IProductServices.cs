@@ -10,15 +10,25 @@ namespace Project.Application.Services
 {
     public interface IProductServices
     {
-        Task<ProductDto> GetByIdAsync(int id);
-        Task<ProductDto> GetByCodeAsync(string code);
-        Task<PagedResult<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
+        Task<ProductDto?> GetByIdAsync(int id);
+        Task<ProductDto?> GetByCodeAsync(string code);
+        Task<PagedResult<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string? searchTerm = null);
         Task AddAsync(ProductCreateDto product);
         Task UpdateAsync(ProductUpdateDto product);
         Task DeleteAsync(int id);
         Task<bool> ExistsAsync(string code);
-        Task<int> CountAsync(string searchTerm = null);
-        Task<IEnumerable<ProductDto>> GetAvailableProductsAsync(int pageNumber, int pageSize, string searchTerm = null);
+        Task<int> CountAsync(string? searchTerm = null);
+        Task<IEnumerable<ProductDto>> GetAvailableProductsAsync(int pageNumber, int pageSize, string? searchTerm = null);
         Task<bool> HasStockAsync(int productId, int quantity);
+
+        // ✅ Métodos nuevos para borrado lógico
+        Task<PagedResult<ProductDto>> GetAllIncludingDeletedAsync(int pageNumber, int pageSize, string? searchTerm = null);
+        Task<IEnumerable<ProductDto>> GetDeletedProductsAsync();
+        Task RestoreAsync(int id);
+        Task<int> CountAllAsync(string? searchTerm = null);
+
+        // ✅ Métodos adicionales útiles
+        Task<IEnumerable<ProductDto>> GetLowStockProductsAsync(int threshold = 10);
+        Task UpdateStockAsync(ProductStockUpdateDto stockUpdateDto);
     }
 }

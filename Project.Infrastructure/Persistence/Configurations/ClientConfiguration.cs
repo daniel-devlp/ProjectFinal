@@ -18,7 +18,7 @@ namespace Project.Infrastructure.Persistence.Configurations
             builder.Property(c => c.IdentificationType)
                 .HasMaxLength(20)
                 .IsRequired()
-                .HasDefaultValue("DNI"); // Valor por defecto para registros existentes
+                .HasDefaultValue("CEDULA"); // Valor por defecto para registros existentes
 
             builder.Property(c => c.IdentificationNumber)
                 .HasMaxLength(20)
@@ -41,15 +41,32 @@ namespace Project.Infrastructure.Persistence.Configurations
             builder.Property(c => c.Address)
                 .HasMaxLength(500);
 
+            // ? Configuración para borrado lógico
+            builder.Property(c => c.IsActive)
+                .IsRequired()
+                .HasDefaultValue(true);
+
             builder.Property(c => c.CreatedAt)
-                .IsRequired();
+                .IsRequired()
+                .HasDefaultValueSql("GETUTCDATE()");
 
             builder.Property(c => c.UpdatedAt);
+
+            builder.Property(c => c.DeletedAt); // ? Campo para auditoría de eliminación
+
+            // ? Filtro global para borrado lógico
+            builder.HasQueryFilter(c => c.IsActive);
 
             // Índices para mejorar rendimiento
             builder.HasIndex(c => c.IdentificationNumber)
                 .IsUnique()
                 .HasDatabaseName("IX_Clients_IdentificationNumber");
+
+            builder.HasIndex(c => c.Email)
+                .HasDatabaseName("IX_Clients_Email");
+
+            builder.HasIndex(c => c.IsActive)
+                .HasDatabaseName("IX_Clients_IsActive");
 
             // Relaciones
             builder.HasMany(c => c.Invoices)
@@ -68,8 +85,10 @@ namespace Project.Infrastructure.Persistence.Configurations
             builder.Property(c => c.Phone).HasColumnName("phone");
             builder.Property(c => c.Email).HasColumnName("email");
             builder.Property(c => c.Address).HasColumnName("address");
+            builder.Property(c => c.IsActive).HasColumnName("is_active");
             builder.Property(c => c.CreatedAt).HasColumnName("created_at");
             builder.Property(c => c.UpdatedAt).HasColumnName("updated_at");
+            builder.Property(c => c.DeletedAt).HasColumnName("deleted_at");
             */
         }
     }

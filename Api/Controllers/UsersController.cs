@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Project.Application.Dtos;
+using Project.Application.Services;
 using Project.Infrastructure.Frameworks.Identity;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,217 +13,372 @@ namespace Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    //[Authorize(AuthenticationSchemes = "Bearer")] // Ensure JWT Bearer is used
     public class UsersController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<ApplicationRole> _roleManager;
         private readonly PasswordHistoryService _passwordHistoryService;
+        private readonly IRoleValidationService _roleValidationService;
+        private readonly IImageService _imageService;
+        private readonly ILogger<UsersController> _logger;
 
         public UsersController(
             UserManager<ApplicationUser> userManager,
             RoleManager<ApplicationRole> roleManager,
-            PasswordHistoryService passwordHistoryService)
+            PasswordHistoryService passwordHistoryService,
+            IRoleValidationService roleValidationService,
+            IImageService imageService,
+            ILogger<UsersController> logger)
         {
             _userManager = userManager;
             _roleManager = roleManager;
             _passwordHistoryService = passwordHistoryService;
+            _roleValidationService = roleValidationService;
+            _imageService = imageService;
+            _logger = logger;
         }
 
-        // Admin: List all users
+        /// <summary>
+        /// Lista todos los usuarios (Solo administradores)
+        /// </summary>
         [HttpGet]
         [Authorize(Roles = "Administrator")]
-        public ActionResult<IEnumerable<UserDto>> GetUsers()
+        public async Task<ActionResult<IEnumerable<UserDto>>> GetUsers()
         {
-            var users = _userManager.Users.ToList();
-            var userDtos = users.Select(u => new UserDto
+            try
             {
-                Id = u.Id,
-                UserName = u.UserName,
-                IdentificationNumber = u.Identification,
-                Email = u.Email,
-                EmailConfirmed = u.EmailConfirmed,
-                Roles = _userManager.GetRolesAsync(u).Result,
-                IsLocked = u.LockoutEnd.HasValue && u.LockoutEnd.Value > System.DateTimeOffset.UtcNow
-            }).ToList();
+                var users = _userManager.Users.ToList();
+                var userDtos = new List<UserDto>();
 
-            return Ok(userDtos);
-        }
-
-        // Admin: Get user by id
-        [HttpGet("{id}")]
-       [Authorize(Roles = "Administrator")]
-        public async Task<ActionResult<UserDto>> GetUser(string id)
-        {
-            var user = await _userManager.FindByIdAsync(id);
-            if (user == null) return NotFound();
-            var userDto = new UserDto
-            {
-                Id = user.Id,
-                UserName = user.UserName,
-                Email = user.Email,
-                EmailConfirmed = user.EmailConfirmed,
-                Roles = await _userManager.GetRolesAsync(user),
-                IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > System.DateTimeOffset.UtcNow
-            };
-            return Ok(userDto);
-        }
-
-        // Admin: Create user (with role)
-        [HttpPost]
-        [Authorize(Roles = "Administrator")]
-        public async Task<ActionResult> CreateUser([FromBody] UserCreateDto dto)
-        {
-            var user = new ApplicationUser
-            {
-                Identification = dto.IdentificationNumber,
-                UserName = dto.UserName,
-                Email = dto.Email,
-                EmailConfirmed = false
-            };
-
-            var result = await _userManager.CreateAsync(user, dto.Password);
-            if (!result.Succeeded)
-                return BadRequest(result.Errors);
-
-            // Agregar la contraseña inicial al historial
-            await _passwordHistoryService.AddPasswordToHistoryAsync(user.Id, user.PasswordHash);
-
-            if (dto.Roles != null && dto.Roles.Any())
-            {
-                foreach (var role in dto.Roles)
+                foreach (var user in users)
                 {
-                    if (await _roleManager.RoleExistsAsync(role))
-                        await _userManager.AddToRoleAsync(user, role);
-                }
-            }
-
-            var response = new
-            {
-                user.Id,
-                user.UserName,
-                user.Email,
-                user.Identification,
-                Roles = dto.Roles
-            };
-
-            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, response);
-        }
-
-        // Update user (Admin or own profile)
-        [HttpPut("{id}")]
-        [Authorize(Roles = "Administrator,user")]
-        public async Task<ActionResult> UpdateUser(string id, [FromBody] UserUpdateWithPasswordDto dto)
-        {
-            if (id != dto.Id) return BadRequest("ID mismatch");
-
-            var user = await _userManager.FindByIdAsync(id);
-            if (user == null) return NotFound("User not found");
-
-            // Get current user info
-            string currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            bool isAdmin = User.IsInRole("Administrator");
-            bool isOwner = currentUserId == id;
-
-            // Authorization check: Admin can update any user, regular users can only update themselves
-            if (!isAdmin && !isOwner)
-            {
-                return Forbid("No tienes permisos para actualizar este usuario.");
-            }
-
-            // Update basic user properties (Admin or own profile)
-            if (isAdmin || isOwner)
-            {
-                user.UserName = dto.UserName;
-                user.Email = dto.Email;
-
-                // Only admin can change email confirmation status
-                if (isAdmin)
-                {
-                    user.EmailConfirmed = dto.EmailConfirmed;
-                }
-            }
-
-            // Handle password change
-            if (!string.IsNullOrEmpty(dto.NewPassword))
-            {
-                // For regular users, current password is required
-                if (!isAdmin && string.IsNullOrEmpty(dto.CurrentPassword))
-                {
-                    return BadRequest(new PasswordValidationErrorDto
+                    var roles = await _userManager.GetRolesAsync(user);
+                    userDtos.Add(new UserDto
                     {
-                        ErrorCode = "CURRENT_PASSWORD_REQUIRED",
-                        Message = "La contraseña actual es requerida.",
-                        Errors = new List<string> { "Debes proporcionar tu contraseña actual para cambiarla." }
+                        Id = user.Id,
+                        UserName = user.UserName ?? string.Empty,
+                        IdentificationNumber = user.Identification, // ✅ Solo número de identificación
+                        Email = user.Email ?? string.Empty,
+                        EmailConfirmed = user.EmailConfirmed,
+                        ProfileImageUri = user.ProfileImageUri,
+                        Roles = roles,
+                        IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow,
+                        CreatedAt = user.CreatedAt,
+                        UpdatedAt = user.UpdatedAt
                     });
                 }
 
-                // Verify current password for non-admin users
-                if (!isAdmin)
+                return Ok(userDtos);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting users");
+                return StatusCode(500, new { message = "Internal server error" });
+            }
+        }
+
+        /// <summary>
+        /// Obtiene un usuario por ID (Solo administradores)
+        /// </summary>
+        [HttpGet("{id}")]
+        [Authorize(Roles = "Administrator")]
+        public async Task<ActionResult<UserDto>> GetUser(string id)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(id);
+                if (user == null) return NotFound(new { message = "User not found" });
+
+                var roles = await _userManager.GetRolesAsync(user);
+                var userDto = new UserDto
                 {
-                    var passwordValid = await _userManager.CheckPasswordAsync(user, dto.CurrentPassword);
-                    if (!passwordValid)
+                    Id = user.Id,
+                    UserName = user.UserName ?? string.Empty,
+                    IdentificationNumber = user.Identification, // ✅ Solo número de identificación
+                    Email = user.Email ?? string.Empty,
+                    EmailConfirmed = user.EmailConfirmed,
+                    ProfileImageUri = user.ProfileImageUri,
+                    Roles = roles,
+                    IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow,
+                    CreatedAt = user.CreatedAt,
+                    UpdatedAt = user.UpdatedAt
+                };
+
+                return Ok(userDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user with ID: {UserId}", id);
+                return StatusCode(500, new { message = "Internal server error" });
+            }
+        }
+
+        /// <summary>
+        /// Crea un nuevo usuario (Solo administradores)
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult> CreateUser([FromForm] UserCreateDto dto)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new
                     {
-                        return BadRequest(new PasswordValidationErrorDto
+                        message = "Validation failed",
+                        errors = ModelState
+                    });
+                }
+            
+                // Validar que los roles existen
+                if (dto.Roles != null && dto.Roles.Any())
+                {
+                    var invalidRoles = await _roleValidationService.GetInvalidRolesAsync(dto.Roles);
+                    if (invalidRoles.Any())
+                    {
+                        return BadRequest(new
                         {
-                            ErrorCode = "INVALID_CURRENT_PASSWORD",
-                            Message = "La contraseña actual es incorrecta.",
-                            Errors = new List<string> { "La contraseña actual proporcionada no es válida." }
+                            message = "Invalid roles provided",
+                            invalidRoles = invalidRoles
                         });
                     }
                 }
 
-                // Check if new password was previously used
-                var isPasswordReused = await _passwordHistoryService.IsPasswordReusedAsync(user.Id, dto.NewPassword);
-                if (isPasswordReused)
+                // Verificar si el email ya existe
+                var existingUserByEmail = await _userManager.FindByEmailAsync(dto.Email);
+                if (existingUserByEmail != null)
                 {
-                    return BadRequest(new PasswordValidationErrorDto
+                    return BadRequest(new { message = "Email already exists" });
+                }
+
+                // Verificar si el nombre de usuario ya existe
+                var existingUserByUsername = await _userManager.FindByNameAsync(dto.UserName);
+                if (existingUserByUsername != null)
+                {
+                    return BadRequest(new { message = "Username already exists" });
+                }
+
+                // Subir imagen de perfil si se proporciona
+                string? profileImageUrl = null;
+                string? publicId = null;
+
+                if (dto.ProfileImage != null)
+                {
+                    var imageResult = await _imageService.UploadImageAsync(dto.ProfileImage, "profiles");
+
+                    if (!imageResult.Success)
                     {
-                        ErrorCode = "PASSWORD_PREVIOUSLY_USED",
-                        Message = "No puedes reutilizar una de tus contraseñas anteriores.",
-                        Errors = new List<string> { "La contraseña ingresada ya ha sido utilizada anteriormente." }
+                        return BadRequest(new
+                        {
+                            message = "Failed to upload profile image",
+                            error = imageResult.ErrorMessage
+                        });
+                    }
+
+                    profileImageUrl = imageResult.SecureUrl;
+                    publicId = imageResult.PublicId;
+                }
+
+                // Crear usuario
+                var user = new ApplicationUser
+                {
+                    Identification = dto.IdentificationNumber, // ✅ Solo número de identificación
+                    UserName = dto.UserName,
+                    Email = dto.Email,
+                    EmailConfirmed = false,
+                    ProfileImageUri = profileImageUrl ?? string.Empty,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                var result = await _userManager.CreateAsync(user, dto.Password);
+                if (!result.Succeeded)
+                {
+                    // Si falla la creación y hay imagen, eliminarla
+                    if (!string.IsNullOrEmpty(publicId))
+                    {
+                        try
+                        {
+                            await _imageService.DeleteImageAsync(publicId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to cleanup profile image after user creation failure");
+                        }
+                    }
+
+                    return BadRequest(new
+                    {
+                        message = "User creation failed",
+                        errors = result.Errors
                     });
                 }
 
-                // Change password
-                IdentityResult passwordResult;
-                if (isAdmin)
-                {
-                    // Admin can reset password without current password
-                    var removePasswordResult = await _userManager.RemovePasswordAsync(user);
-                    if (!removePasswordResult.Succeeded)
-                        return BadRequest(removePasswordResult.Errors);
+                // Agregar contraseña al historial
+                await _passwordHistoryService.AddPasswordToHistoryAsync(user.Id, user.PasswordHash!);
 
-                    passwordResult = await _userManager.AddPasswordAsync(user, dto.NewPassword);
-                }
-                else
+                // Asignar rol por defecto "user" automáticamente
+                var defaultRoles = new List<string> { "user" };
+              
+                // Si se proporcionan roles adicionales, validarlos y agregarlos
+                if (dto.Roles != null && dto.Roles.Any())
                 {
-                    // Regular user must provide current password
-                    passwordResult = await _userManager.ChangePasswordAsync(user, dto.CurrentPassword, dto.NewPassword);
-                }
-
-                if (!passwordResult.Succeeded)
-                {
-                    return BadRequest(new PasswordValidationErrorDto
+                    var invalidRoles = await _roleValidationService.GetInvalidRolesAsync(dto.Roles);
+                    if (invalidRoles.Any())
                     {
-                        ErrorCode = "PASSWORD_CHANGE_FAILED",
-                        Message = "Error al cambiar la contraseña.",
-                        Errors = passwordResult.Errors.Select(e => e.Description).ToList()
-                    });
+                        return BadRequest(new
+                        {
+                            message = "Invalid roles provided",
+                            invalidRoles = invalidRoles
+                        });
+                    }
+
+                    // Combinar rol por defecto con roles adicionales (evitando duplicados)
+                    defaultRoles = defaultRoles.Union(dto.Roles).ToList();
                 }
 
-                // Add new password to history
-                await _passwordHistoryService.AddPasswordToHistoryAsync(user.Id, user.PasswordHash);
+                // Asignar todos los roles
+                var addRolesResult = await _userManager.AddToRolesAsync(user, defaultRoles);
+                if (!addRolesResult.Succeeded)
+                {
+                    _logger.LogWarning("Failed to add roles to user {UserId}: {Errors}",
+                        user.Id, string.Join(", ", addRolesResult.Errors.Select(e => e.Description)));
+                }
+
+                var response = new
+                {
+                    user.Id,
+                    user.UserName,
+                    user.Email,
+                    user.Identification, 
+                    user.ProfileImageUri,
+                    Roles = defaultRoles
+                };
+
+                return CreatedAtAction(nameof(GetUser), new { id = user.Id }, response);
             }
-
-            // Admin-only operations
-            if (isAdmin)
+            catch (Exception ex)
             {
-                // Update lockout status
-                user.LockoutEnd = dto.IsLocked ? System.DateTimeOffset.MaxValue : (System.DateTimeOffset?)null;
+                _logger.LogError(ex, "Error creating user");
+                return StatusCode(500, new { message = "Internal server error" });
+            }
+        }
 
-                // Update roles
-                if (dto.Roles != null)
+        /// <summary>
+        /// Actualiza un usuario existente
+        /// </summary>
+        [HttpPut("{id}")]
+        [Authorize(Roles = "Administrator,user")]
+        public async Task<ActionResult> UpdateUser(string id, [FromForm] UserUpdateDto dto)
+        {
+            try
+            {
+                if (id != dto.Id)
+                {
+                    return BadRequest(new { message = "ID mismatch" });
+                }
+
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Validation failed",
+                        errors = ModelState
+                    });
+                }
+
+                var user = await _userManager.FindByIdAsync(id);
+                if (user == null) return NotFound(new { message = "User not found" });
+
+                // Verificar permisos
+                string? currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                bool isAdmin = User.IsInRole("Administrator");
+                bool isOwner = currentUserId == id;
+
+                if (!isAdmin && !isOwner)
+                {
+                    return Forbid("No tienes permisos para actualizar este usuario.");
+                }
+
+                // Validar roles si se proporcionan (solo admin)
+                if (isAdmin && dto.Roles != null && dto.Roles.Any())
+                {
+                    var invalidRoles = await _roleValidationService.GetInvalidRolesAsync(dto.Roles);
+                    if (invalidRoles.Any())
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Invalid roles provided",
+                            invalidRoles = invalidRoles
+                        });
+                    }
+                }
+
+                // Verificar email único
+                var existingUserByEmail = await _userManager.FindByEmailAsync(dto.Email);
+                if (existingUserByEmail != null && existingUserByEmail.Id != id)
+                {
+                    return BadRequest(new { message = "Email already exists" });
+                }
+
+                // Verificar username único
+                var existingUserByUsername = await _userManager.FindByNameAsync(dto.UserName);
+                if (existingUserByUsername != null && existingUserByUsername.Id != id)
+                {
+                    return BadRequest(new { message = "Username already exists" });
+                }
+
+                // Manejar imagen de perfil
+                string? newImageUrl = user.ProfileImageUri;
+                string? publicId = null;
+
+                if (dto.ProfileImage != null)
+                {
+                    var imageResult = await _imageService.UploadImageAsync(dto.ProfileImage, "profiles");
+
+                    if (!imageResult.Success)
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Failed to upload profile image",
+                            error = imageResult.ErrorMessage
+                        });
+                    }
+
+                    newImageUrl = imageResult.SecureUrl;
+                    publicId = imageResult.PublicId;
+
+                    // Eliminar imagen anterior si existe
+                    if (!string.IsNullOrWhiteSpace(user.ProfileImageUri))
+                    {
+                        try
+                        {
+                            await _imageService.DeleteImageByUrlAsync(user.ProfileImageUri);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to delete old profile image");
+                        }
+                    }
+                }
+
+                // Actualizar propiedades básicas
+                if (isAdmin || isOwner)
+                {
+                    user.Identification = dto.IdentificationNumber; // ✅ Solo número de identificación
+                    user.UserName = dto.UserName;
+                    user.Email = dto.Email;
+                    user.ProfileImageUri = newImageUrl ?? string.Empty;
+                    user.UpdatedAt = DateTime.UtcNow;
+
+                    if (isAdmin)
+                    {
+                        user.EmailConfirmed = dto.EmailConfirmed;
+                        user.LockoutEnd = dto.IsLocked ? DateTimeOffset.MaxValue : null;
+                    }
+                }
+
+                // Actualizar roles (solo admin)
+                if (isAdmin && dto.Roles != null)
                 {
                     var userRoles = await _userManager.GetRolesAsync(user);
                     var rolesToAdd = dto.Roles.Except(userRoles).ToList();
@@ -230,77 +386,191 @@ namespace Api.Controllers
 
                     if (rolesToAdd.Any())
                     {
-                        var addRolesResult = await _userManager.AddToRolesAsync(user, rolesToAdd);
-                        if (!addRolesResult.Succeeded)
-                            return BadRequest(addRolesResult.Errors);
+                        await _userManager.AddToRolesAsync(user, rolesToAdd);
                     }
 
                     if (rolesToRemove.Any())
                     {
-                        var removeRolesResult = await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
-                        if (!removeRolesResult.Succeeded)
-                            return BadRequest(removeRolesResult.Errors);
+                        await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
                     }
                 }
+
+                var result = await _userManager.UpdateAsync(user);
+                if (!result.Succeeded)
+                {
+                    return BadRequest(new
+                    {
+                        message = "User update failed",
+                        errors = result.Errors
+                    });
+                }
+
+                return Ok(new { message = "Usuario actualizado exitosamente." });
             }
-
-            // Update user
-            var result = await _userManager.UpdateAsync(user);
-            if (!result.Succeeded)
-                return BadRequest(result.Errors);
-
-            return Ok(new { message = "Usuario actualizado exitosamente." });
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user with ID: {UserId}", id);
+                return StatusCode(500, new { message = "Internal server error" });
+            }
         }
 
-        // Admin: Delete user
+        /// <summary>
+        /// Elimina un usuario (Solo administradores)
+        /// </summary>
         [HttpDelete("{id}")]
         [Authorize(Roles = "Administrator")]
         public async Task<ActionResult> DeleteUser(string id)
         {
-            var user = await _userManager.FindByIdAsync(id);
-            if (user == null) return NotFound();
+            try
+            {
+                var user = await _userManager.FindByIdAsync(id);
+                if (user == null) return NotFound(new { message = "User not found" });
 
-            var result = await _userManager.DeleteAsync(user);
-            if (!result.Succeeded)
-                return BadRequest(result.Errors);
+                // Eliminar imagen de perfil si existe
+                if (!string.IsNullOrWhiteSpace(user.ProfileImageUri))
+                {
+                    try
+                    {
+                        await _imageService.DeleteImageByUrlAsync(user.ProfileImageUri);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete user profile image");
+                    }
+                }
 
-            return NoContent();
+                var result = await _userManager.DeleteAsync(user);
+                if (!result.Succeeded)
+                {
+                    return BadRequest(new
+                    {
+                        message = "User deletion failed",
+                        errors = result.Errors
+                    });
+                }
+
+                return Ok(new { message = "User deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting user with ID: {UserId}", id);
+                return StatusCode(500, new { message = "Internal server error" });
+            }
         }
 
-        // Admin: Unlock user
+        /// <summary>
+        /// Desbloquea un usuario (Solo administradores)
+        /// </summary>
         [HttpPost("{id}/unlock")]
         [Authorize(Roles = "Administrator")]
         public async Task<ActionResult> UnlockUser(string id)
         {
-            var user = await _userManager.FindByIdAsync(id);
-            if (user == null) return NotFound();
+            try
+            {
+                var user = await _userManager.FindByIdAsync(id);
+                if (user == null) return NotFound(new { message = "User not found" });
 
-            user.LockoutEnd = null;
-            await _userManager.UpdateAsync(user);
-            await _userManager.ResetAccessFailedCountAsync(user);
-            return NoContent();
+                user.LockoutEnd = null;
+                user.IsBlocked = false;
+                user.FailedLoginAttempts = 0;
+                user.UpdatedAt = DateTime.UtcNow;
+
+                await _userManager.UpdateAsync(user);
+                await _userManager.ResetAccessFailedCountAsync(user);
+
+                return Ok(new { message = "User unlocked successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unlocking user with ID: {UserId}", id);
+                return StatusCode(500, new { message = "Internal server error" });
+            }
         }
 
-        // Normal user: Get own profile
+        /// <summary>
+        /// Obtiene el perfil del usuario autenticado
+        /// </summary>
         [HttpGet("me")]
         [Authorize(Roles = "Administrator,user")]
         public async Task<ActionResult<UserDto>> GetMyProfile()
         {
-            string userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            var user = await _userManager.FindByIdAsync(userId);
-            if (user == null) return NotFound();
-
-            var userDto = new UserDto
+            try
             {
-                Id = user.Id,
-                UserName = user.UserName,
-                IdentificationNumber = user.Identification,
-                Email = user.Email,
-                EmailConfirmed = user.EmailConfirmed,
-                Roles = await _userManager.GetRolesAsync(user),
-                IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > System.DateTimeOffset.UtcNow
-            };
-            return Ok(userDto);
+                string? userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId)) return Unauthorized();
+
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null) return NotFound(new { message = "User not found" });
+
+                var roles = await _userManager.GetRolesAsync(user);
+                var userDto = new UserDto
+                {
+                    Id = user.Id,
+                    UserName = user.UserName ?? string.Empty,
+                    IdentificationNumber = user.Identification, // ✅ Solo número de identificación
+                    Email = user.Email ?? string.Empty,
+                    EmailConfirmed = user.EmailConfirmed,
+                    ProfileImageUri = user.ProfileImageUri,
+                    Roles = roles,
+                    IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow,
+                    CreatedAt = user.CreatedAt,
+                    UpdatedAt = user.UpdatedAt
+                };
+
+                return Ok(userDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user profile");
+                return StatusCode(500, new { message = "Internal server error" });
+            }
+        }
+
+        /// <summary>
+        /// Elimina solo la foto de perfil de un usuario
+        /// </summary>
+        [HttpDelete("{id}/profile-image")]
+        [Authorize(Roles = "Administrator,user")]
+        public async Task<ActionResult> DeleteUserProfileImage(string id)
+        {
+            try
+            {
+                var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                bool isAdmin = User.IsInRole("Administrator");
+                bool isOwner = currentUserId == id;
+
+                if (!isAdmin && !isOwner)
+                {
+                    return Forbid("No tienes permisos para eliminar esta imagen.");
+                }
+
+                var user = await _userManager.FindByIdAsync(id);
+                if (user == null) return NotFound(new { message = "User not found" });
+
+                if (string.IsNullOrWhiteSpace(user.ProfileImageUri))
+                {
+                    return BadRequest(new { message = "User has no profile image to delete" });
+                }
+
+                var result = await _imageService.DeleteImageByUrlAsync(user.ProfileImageUri);
+                if (result)
+                {
+                    user.ProfileImageUri = string.Empty;
+                    user.UpdatedAt = DateTime.UtcNow;
+                    await _userManager.UpdateAsync(user);
+
+                    return Ok(new { message = "Profile image deleted successfully" });
+                }
+                else
+                {
+                    return NotFound(new { message = "Image not found or could not be deleted" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting profile image for user ID: {UserId}", id);
+                return StatusCode(500, new { message = "Internal server error" });
+            }
         }
     }
 }

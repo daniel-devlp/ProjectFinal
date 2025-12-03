@@ -129,6 +129,7 @@ namespace Api
             builder.Services.AddScoped<IProductServices, ProductService>();
             builder.Services.AddScoped<IInvoiceServices, InvoiceService>();
             builder.Services.AddScoped<IShoppingCartService, ShoppingCartService>();
+            builder.Services.AddScoped<IInvoiceNumberService, InvoiceNumberService>(); // ✅ Nuevo servicio
 
             // Image Service - Cloudinary
             builder.Services.AddScoped<IImageService, ImageService>();
@@ -142,6 +143,7 @@ namespace Api
             // Infrastructure Services
             builder.Services.AddScoped<PasswordHistoryService>();
             builder.Services.AddScoped<CustomPasswordValidator>();
+            builder.Services.AddScoped<IRoleValidationService, Project.Infrastructure.Services.RoleValidationService>();
 
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();

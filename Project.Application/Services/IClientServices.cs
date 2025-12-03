@@ -18,5 +18,11 @@ namespace Project.Application.Services
         Task DeleteAsync(int id);
         Task<bool> ExistsAsync(string identification);
         Task<int> CountAsync(string searchTerm = null);
+        
+        // ✅ Métodos nuevos para borrado lógico
+        Task<PagedResult<ClientDto>> GetAllIncludingDeletedAsync(int pageNumber, int pageSize, string? searchTerm = null);
+        Task<IEnumerable<ClientDto>> GetDeletedClientsAsync();
+        Task RestoreAsync(int id);
+        Task<int> CountAllAsync(string? searchTerm = null);
     }
 }

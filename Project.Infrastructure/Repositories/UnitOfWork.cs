@@ -1,17 +1,21 @@
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.AspNetCore.Identity;
 using Project.Domain.Interfaces;
 using Project.Infrastructure.Frameworks.EntityFramework;
+using Project.Infrastructure.Frameworks.Identity;
 
 namespace Project.Infrastructure.Repositories
 {
     public class UnitOfWork : IUnitOfWork
     {
         private readonly ApplicationDBContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
         private IDbContextTransaction _transaction;
 
-        public UnitOfWork(ApplicationDBContext context)
+        public UnitOfWork(ApplicationDBContext context, UserManager<ApplicationUser> userManager)
         {
             _context = context;
+            _userManager = userManager;
         }
 
         public IClientRepository Clients => 
@@ -23,7 +27,7 @@ namespace Project.Infrastructure.Repositories
         private IProductRepository _productRepository;
 
         public IInvoiceRepository Invoices =>
-            _invoiceRepository ??= new InvoiceRepository(_context);
+            _invoiceRepository ??= new InvoiceRepository(_context, _userManager); // ? Pasar UserManager
         private IInvoiceRepository _invoiceRepository;
 
         public IShoppingCartRepository ShoppingCart =>

@@ -5,26 +5,23 @@ namespace Project.Application.Services
 {
     public interface IInvoiceServices
     {
-        Task<InvoiceDto> GetByIdAsync(int id);
-        Task<PagedResult<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
-        Task AddAsync(InvoiceCreateDto invoiceDto);
-        Task UpdateAsync(InvoiceUpdateDto invoiceDto);
+        Task<InvoiceDto?> GetByIdAsync(int id);
+        Task<PagedResult<InvoiceDto>> GetAllAsync(int pageNumber, int pageSize, string? searchTerm = null);
+        Task<InvoiceDto> AddAsync(InvoiceCreateDto invoiceDto, string currentUserId);
+        Task<InvoiceDto> UpdateAsync(InvoiceUpdateDto invoiceDto);
         Task DeleteAsync(int id);
-        Task<int> CountAsync(string searchTerm = null);
-
-        // Detalle de factura (detalle)
+        Task<int> CountAsync(string? searchTerm = null);
         Task<IEnumerable<InvoiceDetailDto>> GetInvoiceDetailsAsync(int invoiceId);
 
-        // Lógica de ventas (maestro-detalle)
-        Task AddProductToInvoiceAsync(int invoiceId, int productId, int quantity);
-        Task RemoveProductFromInvoiceAsync(int invoiceId, int productId);
-        Task UpdateProductInInvoiceAsync(int invoiceId, int oldProductId, int newProductId, int newQuantity);
+        // ✅ Métodos nuevos para borrado lógico
+        Task<PagedResult<InvoiceDto>> GetAllIncludingDeletedAsync(int pageNumber, int pageSize, string? searchTerm = null);
+        Task<IEnumerable<InvoiceDto>> GetDeletedInvoicesAsync();
+        Task RestoreAsync(int id);
+        Task<int> CountAllAsync(string? searchTerm = null);
 
-        // Validaciones de negocio
-        Task<bool> ProductExistsInInvoiceAsync(int invoiceId, int productId);
-        Task<bool> ValidateStockForInvoiceAsync(int invoiceId);
-
-        // Cálculo de totales
-        Task<InvoiceDto> CalculateTotalsAsync(int invoiceId);
+        // ✅ Métodos para operaciones específicas de facturas
+        Task<InvoiceDto> FinalizeAsync(InvoiceFinalizeDto dto);
+        Task<InvoiceDto> CancelAsync(InvoiceCancelDto dto);
+        Task<IEnumerable<InvoiceDto>> SearchAsync(InvoiceSearchDto searchDto);
     }
 }

@@ -19,20 +19,22 @@ namespace Project.Domain.Entities
     public string LastName { get; set; } = string.Empty;
         public string Phone { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
-        public string Address { get; set; } = string.Empty;
+public string Address { get; set; } = string.Empty;
         
         // Campos adicionales para Clean Architecture
-        public DateTime CreatedAt { get; set; }
-        public DateTime? UpdatedAt { get; set; }
+ public bool IsActive { get; set; } = true; // ✅ Campo para borrado lógico
+      public DateTime CreatedAt { get; set; }
+      public DateTime? UpdatedAt { get; set; }
+        public DateTime? DeletedAt { get; set; } // ✅ Campo para auditoría de eliminación
 
-        // Navigation properties
-        public virtual ICollection<Invoice> Invoices { get; set; } = new HashSet<Invoice>();
+     // Navigation properties
+   public virtual ICollection<Invoice> Invoices { get; set; } = new HashSet<Invoice>();
 
-        // Constructor sin parámetros para EF
-        public Client() 
+   // Constructor sin parámetros para EF
+      public Client() 
         { 
-          CreatedAt = DateTime.UtcNow;
-        IdentificationType = "DNI"; // Valor por defecto
+    CreatedAt = DateTime.UtcNow;
+  IdentificationType = "CEDULA"; // Valor por defecto
         }
 
    // Constructor con validaciones de dominio
@@ -42,34 +44,51 @@ namespace Project.Domain.Entities
         {
   SetIdentification(identificationType, identificationNumber);
     SetPersonalInfo(firstName, lastName, phone, email, address);
-            CreatedAt = DateTime.UtcNow;
+  CreatedAt = DateTime.UtcNow;
+        IsActive = true; // ✅ Activo por defecto
         }
 
         public void UpdatePersonalInfo(string firstName, string lastName, 
  string phone, string email, string address)
-        {
+      {
         SetPersonalInfo(firstName, lastName, phone, email, address);
-            UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
         }
 
-        public void UpdateIdentification(string identificationType, string identificationNumber)
+   public void UpdateIdentification(string identificationType, string identificationNumber)
         {
       SetIdentification(identificationType, identificationNumber);
    UpdatedAt = DateTime.UtcNow;
+        }
+
+        // ✅ Método para borrado lógico
+        public void SoftDelete()
+        {
+      IsActive = false;
+        DeletedAt = DateTime.UtcNow;
+    UpdatedAt = DateTime.UtcNow;
+        }
+
+  // ✅ Método para restaurar cliente eliminado
+        public void Restore()
+        {
+    IsActive = true;
+    DeletedAt = null;
+            UpdatedAt = DateTime.UtcNow;
         }
 
         private void SetIdentification(string type, string number)
         {
    try
     {
-                // Validar usando Value Object pero mantener en propiedades primitivas
-                var identification = new Identification(type, number);
+        // Validar usando Value Object pero mantener en propiedades primitivas
+ var identification = new Identification(type, number);
           IdentificationType = identification.Type;
           IdentificationNumber = identification.Number;
           }
     catch (ArgumentException ex)
       {
-       throw new ClientDomainException($"Invalid identification: {ex.Message}");
+     throw new ClientDomainException($"Invalid identification: {ex.Message}");
    }
         }
 
@@ -82,32 +101,32 @@ if (string.IsNullOrWhiteSpace(firstName))
             if (string.IsNullOrWhiteSpace(lastName))
     throw new ClientDomainException("Last name is required");
 
-            if (!string.IsNullOrWhiteSpace(email) && !IsValidEmail(email))
-             throw new ClientDomainException("Invalid email format");
+   if (!string.IsNullOrWhiteSpace(email) && !IsValidEmail(email))
+       throw new ClientDomainException("Invalid email format");
 
 FirstName = firstName.Trim();
-          LastName = lastName.Trim();
+  LastName = lastName.Trim();
    Phone = phone?.Trim() ?? string.Empty;
  Email = email?.Trim() ?? string.Empty;
   Address = address?.Trim() ?? string.Empty;
-        }
+     }
 
-        private static bool IsValidEmail(string email)
+    private static bool IsValidEmail(string email)
         {
     try
-            {
+       {
               var addr = new System.Net.Mail.MailAddress(email);
       return addr.Address == email;
-            }
+    }
  catch
             {
  return false;
           }
-        }
+     }
 
         public string GetFullName() => $"{FirstName} {LastName}";
 
         // Método helper para obtener el Value Object cuando sea necesario
-      public Identification GetIdentification() => new Identification(IdentificationType, IdentificationNumber);
+  public Identification GetIdentification() => new Identification(IdentificationType, IdentificationNumber);
     }
 }

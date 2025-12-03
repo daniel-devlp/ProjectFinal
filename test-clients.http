@@ -1,0 +1,163 @@
+### Test Client Creation - Con cédula válida
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "CEDULA",
+  "identificationNumber": "1756789012",
+  "firstName": "Juan Carlos",
+  "lastName": "Pérez García",
+  "phone": "0987654321",
+  "email": "juan.perez@email.com",
+  "address": "Av. 10 de Agosto 123, Quito"
+}
+
+### Test Client Creation - Con cédula inválida (debe fallar)
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "CEDULA",
+"identificationNumber": "1234567890",
+  "firstName": "Test",
+  "lastName": "Invalid",
+  "phone": "0987654321",
+  "email": "test@email.com",
+  "address": "Test Address"
+}
+
+### Test Client Creation - Con pasaporte válido
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "PASAPORTE",
+  "identificationNumber": "ABC123456",
+  "firstName": "María Elena",
+  "lastName": "González",
+  "phone": "0223456789",
+  "email": "maria.gonzalez@email.com",
+  "address": "Calle de los Libertadores 456, Guayaquil"
+}
+
+### Test Client Creation - Con tipo de identificación inválido (debe fallar)
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "RUC",
+  "identificationNumber": "1756789012",
+  "firstName": "Test",
+  "lastName": "Invalid",
+  "phone": "0987654321",
+  "email": "test2@email.com",
+  "address": "Test Address"
+}
+
+### Test Client Creation - Con teléfono inválido (debe fallar)
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "CEDULA",
+  "identificationNumber": "1756789013",
+  "firstName": "Test",
+  "lastName": "Phone",
+  "phone": "123456789",
+  "email": "test3@email.com",
+  "address": "Test Address"
+}
+
+### Test Client Creation - Con email inválido (debe fallar)
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "CEDULA",
+  "identificationNumber": "1756789014",
+  "firstName": "Test",
+  "lastName": "Email",
+  "phone": "0987654321",
+  "email": "invalid-email",
+  "address": "Test Address"
+}
+
+### Get All Clients (Solo activos)
+
+GET https://localhost:7114/api/client?pageNumber=1&pageSize=10
+Authorization: Bearer {{user_token}}
+
+### Get All Clients Including Deleted (Solo admin)
+
+GET https://localhost:7114/api/client/all-including-deleted?pageNumber=1&pageSize=10
+Authorization: Bearer {{admin_token}}
+
+### Get Deleted Clients Only (Solo admin)
+
+GET https://localhost:7114/api/client/deleted
+Authorization: Bearer {{admin_token}}
+
+### Update Client - Con validaciones
+
+PUT https://localhost:7114/api/client/1
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "clientId": 1,
+  "identificationType": "CEDULA",
+  "identificationNumber": "1756789012",
+  "firstName": "Juan Carlos Actualizado",
+  "lastName": "Pérez García",
+  "phone": "0987654321",
+  "email": "juan.updated@email.com",
+  "address": "Nueva Dirección 789, Quito"
+}
+
+### Soft Delete Client
+
+DELETE https://localhost:7114/api/client/1
+Authorization: Bearer {{admin_token}}
+
+### Restore Deleted Client
+
+POST https://localhost:7114/api/client/1/restore
+Authorization: Bearer {{admin_token}}
+
+### Get Client Statistics
+
+GET https://localhost:7114/api/client/statistics
+Authorization: Bearer {{admin_token}}
+
+### Get Client by Identification
+
+GET https://localhost:7114/api/client/by-identification/1756789012
+Authorization: Bearer {{user_token}}
+
+### Test Client Creation - Con identificación duplicada (debe fallar)
+
+POST https://localhost:7114/api/client
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "identificationType": "CEDULA",
+  "identificationNumber": "1756789012",
+  "firstName": "Otro",
+  "lastName": "Cliente",
+  "phone": "0987654321",
+  "email": "otro@email.com",
+  "address": "Otra dirección"
+}

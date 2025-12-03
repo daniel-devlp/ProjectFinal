@@ -13,7 +13,7 @@ namespace Project.Application.Services
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
-        public async Task<ProductDto> GetByIdAsync(int id)
+        public async Task<ProductDto?> GetByIdAsync(int id)
         {
             if (id <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(id));
 
@@ -21,7 +21,7 @@ namespace Project.Application.Services
             return product != null ? ToProductDto(product) : null;
         }
 
-        public async Task<ProductDto> GetByCodeAsync(string code)
+        public async Task<ProductDto?> GetByCodeAsync(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Product code is required.", nameof(code));
 
@@ -29,7 +29,7 @@ namespace Project.Application.Services
             return product != null ? ToProductDto(product) : null;
         }
 
-        public async Task<PagedResult<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null)
+        public async Task<PagedResult<ProductDto>> GetAllAsync(int pageNumber, int pageSize, string? searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
@@ -50,60 +50,71 @@ namespace Project.Application.Services
         public async Task AddAsync(ProductCreateDto productDto)
         {
             if (productDto == null) throw new ArgumentNullException(nameof(productDto));
-            if (string.IsNullOrWhiteSpace(productDto.Code)) throw new ArgumentException("Product code is required.", nameof(productDto.Code));
-            if (string.IsNullOrWhiteSpace(productDto.Name)) throw new ArgumentException("Product name is required.", nameof(productDto.Name));
-            if (productDto.Price < 0) throw new ArgumentException("Price cannot be negative.", nameof(productDto.Price));
-            if (productDto.Stock < 0) throw new ArgumentException("Stock cannot be negative.", nameof(productDto.Stock));
 
-            // Check uniqueness
+            // ✅ Validación mejorada de unicidad para código
             if (await _unitOfWork.Products.ExistsByCodeAsync(productDto.Code.Trim()))
-                throw new InvalidOperationException("A product with this code already exists.");
+                throw new InvalidOperationException("Ya existe un producto con este código.");
 
-            var product = new Product
+            try
             {
-                Code = productDto.Code.Trim(),
-                Name = productDto.Name.Trim(),
-                Description = productDto.Description?.Trim(),
-                Price = productDto.Price,
-                Stock = productDto.Stock,
-                IsActive = true,
-                ImageUri = productDto.ImageUri
-            };
+                // Usar el constructor de dominio que incluye validaciones
+                var product = new Product(
+                    productDto.Code.Trim(),
+                    productDto.Name.Trim(),
+                    productDto.Description?.Trim() ?? string.Empty,
+                    productDto.Price,
+                    productDto.Stock,
+                    productDto.ImageUri ?? string.Empty
+                );
 
-            await _unitOfWork.Products.AddAsync(product);
-            await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.Products.AddAsync(product);
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Error creating product: {ex.Message}", ex);
+            }
         }
 
         public async Task UpdateAsync(ProductUpdateDto productDto)
         {
             if (productDto == null) throw new ArgumentNullException(nameof(productDto));
-            if (productDto.ProductId <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(productDto.ProductId));
-            if (string.IsNullOrWhiteSpace(productDto.Code)) throw new ArgumentException("Product code is required.", nameof(productDto.Code));
-            if (string.IsNullOrWhiteSpace(productDto.Name)) throw new ArgumentException("Product name is required.", nameof(productDto.Name));
-            if (productDto.Price < 0) throw new ArgumentException("Price cannot be negative.", nameof(productDto.Price));
-            if (productDto.Stock < 0) throw new ArgumentException("Stock cannot be negative.", nameof(productDto.Stock));
 
             var existingProduct = await _unitOfWork.Products.GetByIdAsync(productDto.ProductId);
             if (existingProduct == null)
                 throw new InvalidOperationException("Product does not exist.");
 
-            // If code is changed, check uniqueness
+            // ✅ Validar unicidad mejorada para código si cambia
             if (!string.Equals(existingProduct.Code, productDto.Code, StringComparison.OrdinalIgnoreCase))
             {
-                if (await _unitOfWork.Products.ExistsByCodeAsync(productDto.Code.Trim()))
-                    throw new InvalidOperationException("A product with this code already exists.");
+                if (await _unitOfWork.Products.ExistsByCodeAsync(productDto.Code.Trim(), existingProduct.ProductId))
+                    throw new InvalidOperationException("Ya existe un producto con este código.");
             }
 
-            existingProduct.Code = productDto.Code.Trim();
-            existingProduct.Name = productDto.Name.Trim();
-            existingProduct.Description = productDto.Description?.Trim();
-            existingProduct.Price = productDto.Price;
-            existingProduct.Stock = productDto.Stock;
-            existingProduct.IsActive = productDto.IsActive;
-            existingProduct.ImageUri = productDto.ImageUri ?? string.Empty; // Actualizar ImageUri
+            try
+            {
+                // ✅ Usar métodos de dominio para actualizar
+                existingProduct.UpdateProduct(
+                    productDto.Name.Trim(),
+                    productDto.Description?.Trim() ?? string.Empty,
+                    productDto.Price,
+                    productDto.Stock,
+                    productDto.ImageUri ?? string.Empty
+                );
 
-            _unitOfWork.Products.Update(existingProduct);
-            await _unitOfWork.SaveChangesAsync();
+                // Actualizar código si cambió
+                if (!string.Equals(existingProduct.Code, productDto.Code, StringComparison.OrdinalIgnoreCase))
+                {
+                    existingProduct.SetCode(productDto.Code.Trim());
+                }
+
+                _unitOfWork.Products.Update(existingProduct);
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Error updating product: {ex.Message}", ex);
+            }
         }
 
         public async Task DeleteAsync(int id)
@@ -114,32 +125,73 @@ namespace Project.Application.Services
             if (product == null)
                 throw new InvalidOperationException("Product does not exist.");
 
-            _unitOfWork.Products.Remove(product);
+            // ✅ Borrado lógico en lugar de físico
+            product.SoftDelete();
+            _unitOfWork.Products.Update(product);
             await _unitOfWork.SaveChangesAsync();
         }
 
-        public Task<bool> ExistsAsync(string code)
+        // ✅ Métodos nuevos para borrado lógico
+        public async Task<PagedResult<ProductDto>> GetAllIncludingDeletedAsync(int pageNumber, int pageSize, string? searchTerm = null)
+        {
+            if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
+            if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
+
+            var (products, totalCount) = await _unitOfWork.Products.GetPagedIncludingDeletedAsync(pageNumber, pageSize, searchTerm);
+            var productDtos = products.Select(ToProductDto).ToList();
+
+            return new PagedResult<ProductDto>
+            {
+                Items = productDtos,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+        }
+
+        public async Task<IEnumerable<ProductDto>> GetDeletedProductsAsync()
+        {
+            var products = await _unitOfWork.Products.GetDeletedProductsAsync();
+            return products.Select(ToProductDto);
+        }
+
+        public async Task RestoreAsync(int id)
+        {
+            if (id <= 0) throw new ArgumentException("Product ID must be greater than zero.", nameof(id));
+
+            await _unitOfWork.Products.RestoreAsync(id);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        public async Task<bool> ExistsAsync(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Product code is required.", nameof(code));
-            return _unitOfWork.Products.ExistsByCodeAsync(code.Trim());
+            return await _unitOfWork.Products.ExistsByCodeAsync(code.Trim());
         }
 
-        public async Task<int> CountAsync(string searchTerm = null)
+        public async Task<int> CountAsync(string? searchTerm = null)
         {
-            return await _unitOfWork.Products.CountAsync(p => 
-                string.IsNullOrEmpty(searchTerm) || 
-                p.Name.Contains(searchTerm) || 
-                p.Code.Contains(searchTerm) || 
-                p.Description.Contains(searchTerm));
+            return await _unitOfWork.Products.GetActiveCountAsync(); // Solo productos activos
         }
 
-        public async Task<IEnumerable<ProductDto>> GetAvailableProductsAsync(int pageNumber, int pageSize, string searchTerm = null)
+        public async Task<int> CountAllAsync(string? searchTerm = null)
+        {
+            return await _unitOfWork.Products.GetTotalCountAsync(); // Todos los productos
+        }
+
+        public async Task<IEnumerable<ProductDto>> GetAvailableProductsAsync(int pageNumber, int pageSize, string? searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));
             if (pageSize <= 0) throw new ArgumentException("Page size must be greater than zero.", nameof(pageSize));
 
             var (products, _) = await _unitOfWork.Products.GetAvailableProductsAsync(pageNumber, pageSize, searchTerm?.Trim());
             return products?.Select(ToProductDto) ?? Enumerable.Empty<ProductDto>();
+        }
+
+        public async Task<IEnumerable<ProductDto>> GetLowStockProductsAsync(int threshold = 10)
+        {
+            var products = await _unitOfWork.Products.GetLowStockProductsAsync(threshold);
+            return products.Select(ToProductDto);
         }
 
         public Task<bool> HasStockAsync(int productId, int quantity)
@@ -149,10 +201,30 @@ namespace Project.Application.Services
             return _unitOfWork.Products.HasStockAsync(productId, quantity);
         }
 
-        // Mapping method
-        private ProductDto ToProductDto(Product product)
+        public async Task UpdateStockAsync(ProductStockUpdateDto stockUpdateDto)
         {
-            if (product == null) return null;
+            if (stockUpdateDto == null) throw new ArgumentNullException(nameof(stockUpdateDto));
+
+            var product = await _unitOfWork.Products.GetByIdAsync(stockUpdateDto.ProductId);
+            if (product == null)
+                throw new InvalidOperationException("Product does not exist.");
+
+            try
+            {
+                product.IncreaseStock(stockUpdateDto.Quantity);
+                _unitOfWork.Products.Update(product);
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Error updating stock: {ex.Message}", ex);
+            }
+        }
+
+        // ✅ Mapping method mejorado
+        private static ProductDto ToProductDto(Product product)
+        {
+            if (product == null) return null!;
             return new ProductDto
             {
                 ProductId = product.ProductId,
@@ -162,7 +234,10 @@ namespace Project.Application.Services
                 Price = product.Price,
                 Stock = product.Stock,
                 IsActive = product.IsActive,
-                ImageUri = product.ImageUri // Agregar ImageUri al mapping
+                ImageUri = product.ImageUri,
+                CreatedAt = product.CreatedAt,
+                UpdatedAt = product.UpdatedAt,
+                DeletedAt = product.DeletedAt
             };
         }
     }

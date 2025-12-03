@@ -138,5 +138,11 @@ namespace Project.Infrastructure.Repositories
                 _dbSet.Update(client);
             }
         }
+
+        public async Task<Client?> GetByEmailAsync(string email)
+        {
+            return await _dbSet.FirstOrDefaultAsync(c => 
+                c.Email == email);
+        }
     }
 }

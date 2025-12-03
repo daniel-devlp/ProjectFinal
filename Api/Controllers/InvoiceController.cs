@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Project.Application.Dtos;
 using Project.Application.Services;
+using Project.Domain.Interfaces;
 using System.Security.Claims;
 
 namespace Api.Controllers
@@ -12,11 +13,16 @@ namespace Api.Controllers
     {
         private readonly IInvoiceServices _invoiceService;
         private readonly ILogger<InvoiceController> _logger;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public InvoiceController(IInvoiceServices invoiceService, ILogger<InvoiceController> logger)
+        public InvoiceController(
+            IInvoiceServices invoiceService, 
+            ILogger<InvoiceController> logger,
+            IUnitOfWork unitOfWork)
         {
             _invoiceService = invoiceService;
             _logger = logger;
+            _unitOfWork = unitOfWork;
         }
 
         /// <summary>
@@ -406,6 +412,172 @@ namespace Api.Controllers
                 _logger.LogError(ex, "Error getting invoice details for ID: {InvoiceId}", id);
                 return StatusCode(500, new { message = "Internal server error" });
             }
+        }
+
+        /// <summary>
+        /// ⚠️ MÉTODO DE PRUEBA TEMPORAL - Verifica datos del usuario autenticado
+        /// </summary>
+        [HttpGet("test-user-data")]
+        [Authorize(Roles = "Administrator,user")]
+        public async Task<IActionResult> TestUserData()
+        {
+            try
+            {
+                var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserId))
+                {
+                    return Unauthorized(new { message = "Usuario no autenticado" });
+                }
+
+                _logger.LogInformation("🧪 Testing user data for user: {UserId}", currentUserId);
+
+                // Obtener datos del usuario directamente del repositorio
+                var userData = await _unitOfWork.Invoices.GetUserDataAsync(currentUserId);
+    
+                var claims = User.Claims.ToDictionary(c => c.Type, c => c.Value);
+
+                var response = new
+                {
+                    success = true,
+                    message = "Datos del usuario obtenidos correctamente",
+                    currentUserId = currentUserId,
+                    userDataFromRepo = userData,
+                    claimsFromToken = claims,
+                    userExistsInDb = await _unitOfWork.Invoices.UserExistsAsync(currentUserId)
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error testing user data");
+                return StatusCode(500, new { message = "Internal server error", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Crea una nueva factura asociada automáticamente al usuario autenticado (para carrito de compras y móvil)
+        /// </summary>
+        [HttpPost("create-for-current-user")]
+        [Authorize(Roles = "Administrator,user")]
+        public async Task<IActionResult> CreateForCurrentUser([FromBody] InvoiceCreateForUserDto invoiceDto)
+        {
+            try
+ {
+            // ✅ Obtener usuario actual del token JWT
+      var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+ var currentUserName = User.FindFirst(ClaimTypes.Name)?.Value;
+        var currentUserEmail = User.FindFirst(ClaimTypes.Email)?.Value;
+
+  _logger.LogInformation("🚀 Creating invoice for authenticated user: UserId={UserId}, UserName={UserName}, Email={Email}", 
+currentUserId, currentUserName, currentUserEmail);
+
+      if (string.IsNullOrEmpty(currentUserId))
+        {
+       _logger.LogWarning("❌ Unauthorized access - no user ID in token");
+          return Unauthorized(new { message = "Usuario no autenticado" });
+                }
+
+     if (!ModelState.IsValid)
+                {
+   _logger.LogWarning("❌ Validation failed for user {UserId}: {Errors}", 
+          currentUserId, string.Join(", ", ModelState.Values.SelectMany(v => v.Errors.Select(e => e.ErrorMessage))));
+        
+       return BadRequest(new { 
+               success = false,
+   message = "Validation failed", 
+     errors = ModelState.Where(x => x.Value?.Errors.Count > 0)
+         .ToDictionary(
+ kvp => kvp.Key,
+kvp => kvp.Value?.Errors.Select(e => e.ErrorMessage).ToArray()
+         )
+     });
+ }
+
+       _logger.LogInformation("📦 Creating invoice with {DetailCount} items for user {UserId}", 
+            invoiceDto.InvoiceDetails?.Count ?? 0, currentUserId);
+
+            // ✅ Crear factura asociada automáticamente al usuario
+    var createdInvoice = await _invoiceService.CreateInvoiceForUserAsync(currentUserId, invoiceDto);
+       
+      _logger.LogInformation("✅ Invoice created successfully: InvoiceId={InvoiceId}, InvoiceNumber={InvoiceNumber}, ClientId={ClientId}, UserId={UserId}, Total={Total}", 
+     createdInvoice.InvoiceId, createdInvoice.InvoiceNumber, createdInvoice.ClientId, createdInvoice.UserId, createdInvoice.Total);
+
+             // ✅ Validar que el cliente está asociado correctamente
+  var clientMatchesUser = createdInvoice.Client != null && 
+          (createdInvoice.Client.Email == currentUserEmail || 
+     createdInvoice.UserId == currentUserId);
+
+      var response = new
+       {
+    success = true,
+     message = "Factura creada exitosamente para el usuario actual",
+       invoice = createdInvoice,
+      // ✅ Información detallada del cliente
+        clientInfo = createdInvoice.Client != null ? new
+          {
+       createdInvoice.Client.ClientId,
+  createdInvoice.Client.FirstName,
+    createdInvoice.Client.LastName,
+    createdInvoice.Client.Email,
+          createdInvoice.Client.IdentificationNumber,
+      createdInvoice.Client.Phone,
+             IsNewClient = true, // Para el frontend saber si se creó nuevo
+       MatchesUserData = clientMatchesUser // Verificación de integridad
+       } : null,
+ summary = new
+       {
+          createdInvoice.Total,
+   createdInvoice.Subtotal,
+ createdInvoice.Tax,
+          ItemCount = createdInvoice.InvoiceDetails?.Count ?? 0,
+       createdInvoice.Status,
+       createdInvoice.InvoiceNumber,
+      CreatedAt = createdInvoice.CreatedAt
+   },
+     userInfo = new // Info del usuario para verificación
+ {
+        currentUserId,
+        currentUserName,
+       currentUserEmail,
+           ClientAssociated = createdInvoice.ClientId
+          }
+                };
+
+      return StatusCode(StatusCodes.Status201Created, response);
+       }
+ catch (InvalidOperationException ex)
+    {
+     _logger.LogError(ex, "❌ Business logic error creating invoice for user {UserId}: {Message}", 
+       User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
+  return BadRequest(new { 
+     success = false,
+        message = ex.Message,
+        errorType = "BusinessLogicError",
+    details = ex.InnerException?.Message
+ });
+     }
+            catch (ArgumentException ex)
+          {
+          _logger.LogError(ex, "❌ Validation error creating invoice for user {UserId}: {Message}", 
+     User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
+    return BadRequest(new { 
+          success = false,
+          message = ex.Message,
+        errorType = "ValidationError"
+     });
+ }
+            catch (Exception ex)
+     {
+    _logger.LogError(ex, "💥 Unexpected error creating invoice for user {UserId}: {Message}", 
+       User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
+    return StatusCode(500, new { 
+        success = false,
+       message = "Error interno del servidor. Por favor intente nuevamente.",
+      errorType = "InternalServerError",
+    details = ex.Message // En desarrollo, incluir detalles
+     });
+    }
         }
     }
 }

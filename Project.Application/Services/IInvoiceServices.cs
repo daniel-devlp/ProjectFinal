@@ -13,6 +13,9 @@ namespace Project.Application.Services
         Task<int> CountAsync(string? searchTerm = null);
         Task<IEnumerable<InvoiceDetailDto>> GetInvoiceDetailsAsync(int invoiceId);
 
+        // ✅ Método nuevo para crear facturas asociadas automáticamente al usuario
+        Task<InvoiceDto> CreateInvoiceForUserAsync(string userId, InvoiceCreateForUserDto invoiceDto);
+
         // ✅ Métodos nuevos para borrado lógico
         Task<PagedResult<InvoiceDto>> GetAllIncludingDeletedAsync(int pageNumber, int pageSize, string? searchTerm = null);
         Task<IEnumerable<InvoiceDto>> GetDeletedInvoicesAsync();

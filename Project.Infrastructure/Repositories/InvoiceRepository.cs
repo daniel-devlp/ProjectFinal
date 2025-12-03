@@ -1,5 +1,6 @@
 ﻿using Project.Domain.Entities;
 using Project.Domain.Interfaces;
+using Project.Domain.Dtos;
 using Project.Infrastructure.Frameworks.EntityFramework;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
@@ -9,14 +10,14 @@ namespace Project.Infrastructure.Repositories
 {
     public class InvoiceRepository : Repository<Invoice>, IInvoiceRepository
     {
- private readonly UserManager<ApplicationUser> _userManager;
+        private readonly UserManager<ApplicationUser> _userManager;
 
         public InvoiceRepository(ApplicationDBContext context, UserManager<ApplicationUser> userManager) : base(context)
         {
-      _userManager = userManager;
+        _userManager = userManager;
         }
 
-  public override async Task<Invoice?> GetByIdAsync(int id)
+        public override async Task<Invoice?> GetByIdAsync(int id)
         {
        if (id <= 0) throw new ArgumentException("Invoice ID must be greater than zero.", nameof(id));
        return await _dbSet
@@ -344,5 +345,42 @@ i.Client.FirstName.ToLower().Contains(term) ||
       .AsNoTracking()
      .ToListAsync();
      }
+
+        // ✅ Método nuevo para obtener datos del usuario con logs detallados
+        public async Task<UserDataDto?> GetUserDataAsync(string userId)
+   {
+         try
+         {
+        System.Diagnostics.Debug.WriteLine($"🔍 Buscando usuario con ID: {userId}");
+ 
+     var user = await _userManager.FindByIdAsync(userId);
+       if (user == null) 
+      {
+    System.Diagnostics.Debug.WriteLine($"❌ Usuario no encontrado con ID: {userId}");
+             return null;
+     }
+
+      System.Diagnostics.Debug.WriteLine($"✅ Usuario encontrado: ID={user.Id}, UserName={user.UserName}, Email={user.Email}, Identification={user.Identification}");
+
+        var userData = new UserDataDto
+                {
+     UserId = user.Id,
+        UserName = user.UserName ?? string.Empty,
+        Email = user.Email ?? string.Empty,
+            PhoneNumber = user.PhoneNumber ?? string.Empty,
+          Identification = user.Identification ?? string.Empty
+                };
+
+       System.Diagnostics.Debug.WriteLine($"📋 UserDataDto creado: UserId={userData.UserId}, UserName={userData.UserName}, Email={userData.Email}, Identification={userData.Identification}");
+           
+      return userData;
+     }
+            catch (Exception ex)
+         {
+     System.Diagnostics.Debug.WriteLine($"💥 Error en GetUserDataAsync: {ex.Message}");
+  System.Diagnostics.Debug.WriteLine($"📝 Stack trace: {ex.StackTrace}");
+      return null;
+            }
+        }
     }
 }

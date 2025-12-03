@@ -1,4 +1,5 @@
 ﻿using Project.Domain.Entities;
+using Project.Domain.Dtos;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -46,5 +47,6 @@ namespace Project.Domain.Interfaces
         // Métodos para reportes
         Task<decimal> GetTotalSalesAsync(DateTime? fromDate = null, DateTime? toDate = null);
         Task<IEnumerable<Invoice>> GetTopInvoicesByAmountAsync(int count = 10);
+        Task<UserDataDto?> GetUserDataAsync(string userId);
     }
 }

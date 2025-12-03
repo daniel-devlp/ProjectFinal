@@ -46,6 +46,19 @@ namespace Project.Application.Dtos
         public List<InvoiceDetailCreateDto> InvoiceDetails { get; set; } = new List<InvoiceDetailCreateDto>();
     }
 
+    /// <summary>
+    /// DTO para crear facturas asociadas automáticamente al usuario autenticado (carrito de compras y móvil)
+    /// </summary>
+    public class InvoiceCreateForUserDto
+    {
+        [StringLength(500, ErrorMessage = "Las observaciones no pueden exceder 500 caracteres")]
+        public string? Observations { get; set; }
+
+        [Required(ErrorMessage = "La factura debe contener al menos un detalle")]
+        [ValidInvoiceDetails]
+        public List<InvoiceDetailCreateDto> InvoiceDetails { get; set; } = new List<InvoiceDetailCreateDto>();
+    }
+
     public class InvoiceUpdateDto
     {
         [Required(ErrorMessage = "El ID de la factura es requerido")]

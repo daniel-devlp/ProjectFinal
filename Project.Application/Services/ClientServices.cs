@@ -29,6 +29,15 @@ namespace Project.Application.Services
             return client != null ? MapToDto(client) : null;
         }
 
+        public async Task<ClientDto?> GetByEmailAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                throw new ArgumentException("Email is required.", nameof(email));
+
+            var client = await _unitOfWork.Clients.GetByEmailAsync(email);
+            return client != null ? MapToDto(client) : null;
+        }
+
         public async Task<PagedResult<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string? searchTerm = null)
         {
             if (pageNumber <= 0) throw new ArgumentException("Page number must be greater than zero.", nameof(pageNumber));

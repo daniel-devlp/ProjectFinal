@@ -12,6 +12,7 @@ namespace Project.Application.Services
     {
         Task<ClientDto> GetByIdAsync(int id);
         Task<ClientDto> GetByIdentificationAsync(string identification);
+        Task<ClientDto?> GetByEmailAsync(string email); // ✅ Nuevo método para buscar por email
         Task<PagedResult<ClientDto>> GetAllAsync(int pageNumber, int pageSize, string searchTerm = null);
         Task AddAsync(ClientCreateDto clientDto);
         Task UpdateAsync(ClientUpdateDto clientDto);

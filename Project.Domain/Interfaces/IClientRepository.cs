@@ -10,6 +10,7 @@ namespace Project.Domain.Interfaces
     public interface IClientRepository : IRepository<Client>
     {
         Task<Client?> GetByIdentificationAsync(string identificationNumber);
+        Task<Client?> GetByEmailAsync(string email); // ✅ Nuevo método para buscar por email
         Task<(IEnumerable<Client> Items, int TotalCount)> GetPagedAsync(
             int pageNumber, int pageSize, string searchTerm = null);
             
